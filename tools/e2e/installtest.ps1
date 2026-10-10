@@ -2,7 +2,7 @@
 # appear (including the one on This PC, asked of the shell itself), uninstalls it, and checks that
 # they are gone. Run after `npm run tauri build`. Touches only this user's registry keys.
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$setup = Join-Path $repo 'target\release\bundle\nsis\Spelunker_0.1.0_x64-setup.exe'
+$setup = (Get-ChildItem (Join-Path $repo 'target\release\bundle\nsis\Spelunker_*_x64-setup.exe') | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 $target = Join-Path $PSScriptRoot '.install-test'
 if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 

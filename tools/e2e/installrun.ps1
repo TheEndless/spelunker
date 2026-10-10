@@ -2,7 +2,7 @@
 # does (exe plus the folder with a trailing dot), reports what the window loaded and what is in
 # Look in, then stops it and uninstalls. Run with no other copy of Spelunker open and no dev server.
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..')
-$setup = Join-Path $repo 'target\release\bundle\nsis\Spelunker_0.1.0_x64-setup.exe'
+$setup = (Get-ChildItem (Join-Path $repo 'target\release\bundle\nsis\Spelunker_*_x64-setup.exe') | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 $target = Join-Path $PSScriptRoot '.install-run'
 $profile = Join-Path $PSScriptRoot '.install-run-profile'
 foreach ($path in $target, $profile) { if (Test-Path $path) { Remove-Item -Recurse -Force $path } }
