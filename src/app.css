@@ -1,0 +1,200 @@
+/* Shared sizing. Colors below are designed separately for light and dark. */
+:root {
+  --radius: 6px;
+  --control-height: 30px;
+  --tool-height: 26px;
+  --text-small: 12px;
+}
+
+/* Light and dark are designed separately: each sets its own surfaces, contrast, and highlight. */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --surface-raised: #fafafb;
+  --text: #1d2229;
+  --text-muted: #5a6573;
+  --border: #d5dae1;
+  --border-strong: #b9c0ca;
+  --accent: #a85a00;
+  --accent-hover: #8f4c00;
+  --accent-text: #8f4c00;
+  --placeholder: #8b94a0;
+  --on-accent: #ffffff;
+  --focus-ring: #1a6fd6;
+  --row-hover: #f1f3f6;
+  --row-selected: #fbe9c6;
+  --row-selected-edge: #a85a00;
+  --match-bg: #ffe08a;
+  --match-text: #1d2229;
+  --context-text: #5a6573;
+  --disabled-bg: #e6e9ee;
+  --disabled-text: #8a93a0;
+  --danger: #b3261e;
+  --header-bg: #eceef2;
+  --shadow: 0 6px 18px rgba(20, 26, 36, 0.16);
+  --kind-code: #2f6fd0;
+  --kind-text: #5a6573;
+  --kind-data: #0f7d73;
+  --kind-image: #2a7d37;
+  --kind-pdf: #c43b30;
+  --kind-audio: #8a4fc9;
+  --kind-video: #b82f85;
+  --kind-archive: #9a6200;
+  --kind-document: #2a65b8;
+  --kind-sheet: #1f7a45;
+  --kind-slides: #c0530f;
+  --kind-executable: #66707e;
+  --kind-other: #707a89;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #12151a;
+  --surface: #191d23;
+  --surface-raised: #20252d;
+  --text: #e4e8ee;
+  --text-muted: #98a2b1;
+  --border: #2d343e;
+  --border-strong: #414a57;
+  --accent: #f2a33a;
+  --accent-hover: #ffb85c;
+  --accent-text: #f2a33a;
+  --placeholder: #6b7482;
+  --on-accent: #1b1204;
+  --focus-ring: #6aa9ff;
+  --row-hover: #212630;
+  --row-selected: #3a2e14;
+  --row-selected-edge: #f2a33a;
+  --match-bg: #7a5a00;
+  --match-text: #fff1c7;
+  --context-text: #8993a3;
+  --disabled-bg: #262b33;
+  --disabled-text: #626c7a;
+  --danger: #ff8a80;
+  --header-bg: #1e232b;
+  --shadow: 0 8px 22px rgba(0, 0, 0, 0.5);
+  --kind-code: #7ab0ff;
+  --kind-text: #98a2b1;
+  --kind-data: #4fd1bf;
+  --kind-image: #6fd17d;
+  --kind-pdf: #ff7d70;
+  --kind-audio: #bf94f0;
+  --kind-video: #f08cc9;
+  --kind-archive: #f2c14a;
+  --kind-document: #7da7ee;
+  --kind-sheet: #62c98a;
+  --kind-slides: #ff9a56;
+  --kind-executable: #9ba4b3;
+  --kind-other: #8892a1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+input[type='text'],
+input[type='number'] {
+  height: var(--control-height);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0 9px;
+  min-width: 0;
+}
+
+/* Visually hidden, but still read by screen readers. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+input[type='text']:hover:not(:focus),
+input[type='number']:hover:not(:focus) {
+  border-color: var(--text-muted);
+}
+
+input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+
+/* Compact toolbar buttons: Saved searches, Filters. */
+.tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--tool-height);
+  padding: 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+}
+.tool.icon {
+  width: var(--tool-height);
+  padding: 0;
+  justify-content: center;
+}
+.tool:hover,
+.tool[aria-expanded='true'] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Hint text is softer than muted text, so it reads as a suggestion and not as something typed. */
+input::placeholder {
+  color: var(--placeholder);
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+mark {
+  background: var(--match-bg);
+  color: var(--match-text);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.mono {
+  font-family: 'Cascadia Mono', Consolas, 'Courier New', monospace;
+}

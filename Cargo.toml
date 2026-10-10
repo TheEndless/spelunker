@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/spelunker-core", "crates/spelunker-cli", "src-tauri"]
+# The Tauri shell is slow to compile, so plain cargo commands skip it.
+# Build it explicitly with `-p spelunker-app`.
+default-members = ["crates/spelunker-core", "crates/spelunker-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"

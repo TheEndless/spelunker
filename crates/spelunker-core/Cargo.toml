@@ -1,0 +1,16 @@
+[package]
+name = "spelunker-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ignore = "0.4"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+grep-matcher = "0.1"
+encoding_rs = "0.8"
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,118 @@
+/*
+ * Windows High Contrast ("forced colors"). The browser replaces our colors with the user's system
+ * colors, which removes every state that is shown only by a background color. These rules give
+ * those states an outline and a border, which survive. The !important marks are deliberate: the
+ * components' own scoped rules are more specific and would otherwise win.
+ */
+@media (forced-colors: active) {
+  /* Selected, active, and pressed states */
+  .row.selected,
+  .item.selected,
+  li.active,
+  .line.active,
+  .chip.on,
+  .modes button.on,
+  .tool[aria-expanded='true'] {
+    outline: 2px solid Highlight !important;
+    outline-offset: -2px;
+  }
+
+  .row[role='row']:hover,
+  .item:hover,
+  .recall:hover,
+  li:hover {
+    outline: 1px solid ButtonText;
+    outline-offset: -1px;
+  }
+
+  /* Buttons that rely on a filled background need a visible edge */
+  .go,
+  .chip,
+  .tool,
+  .steps button,
+  .modes button {
+    border: 1px solid ButtonText !important;
+  }
+  .go[aria-disabled='true'],
+  .steps button:disabled {
+    border-color: GrayText !important;
+    color: GrayText !important;
+  }
+
+  .badge {
+    border: 1px solid ButtonText;
+  }
+
+  /* A field with a problem needs more than a red border */
+  input[aria-invalid='true'] {
+    border-width: 2px !important;
+    border-style: dashed !important;
+  }
+
+  /* Field groups draw the focus ring themselves, since the input inside has none */
+  .group:focus-within {
+    outline: 2px solid Highlight !important;
+    outline-offset: 1px;
+  }
+  .group:has([aria-invalid='true']) {
+    border-width: 2px !important;
+    border-style: dashed !important;
+  }
+  .affix {
+    border-right: 1px solid ButtonText !important;
+  }
+
+  /* The welcome's starting points are buttons and must look like it */
+  .start,
+  .card {
+    border: 1px solid ButtonText !important;
+  }
+
+  /* Highlighted match text keeps its meaning */
+  mark {
+    background: Highlight !important;
+    color: HighlightText !important;
+    forced-color-adjust: none;
+  }
+
+  /* Decoration that carries information */
+  .beam::before {
+    background: Highlight !important;
+    forced-color-adjust: none;
+  }
+  .spinner {
+    border-color: GrayText !important;
+    border-top-color: Highlight !important;
+    forced-color-adjust: none;
+  }
+  .drop-hint {
+    border-color: Highlight !important;
+  }
+
+  /* Theme swatches show the theme's real colors, so they must not be recolored */
+  .swatch,
+  .swatch * {
+    forced-color-adjust: none;
+  }
+
+  /* Lines drawn only with a background would vanish, so they take system colors instead. */
+  .drop-line {
+    background: Highlight !important;
+    forced-color-adjust: none;
+  }
+  .resizer::after {
+    background: ButtonText !important;
+    forced-color-adjust: none;
+  }
+
+  .tool[aria-disabled='true'] {
+    color: GrayText !important;
+    border-color: GrayText !important;
+  }
+
+  .popover,
+  .menu,
+  .dialog {
+    border: 1px solid CanvasText !important;
+  }
+}

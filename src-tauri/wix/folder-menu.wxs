@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  "Search with Spelunker" in Explorer's right-click menu for folders, the empty space inside a
+  folder, and drives. The MSI installs for all users, so the entries go under HKLM\Software\Classes.
+  The dot after each placeholder is deliberate: a drive arrives as "D:\" and a trailing backslash
+  inside quotes would escape the closing quote. The app removes the dot again.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="ExplorerFolderMenu" Guid="6f3c1c5e-8a42-4d0e-9b5a-2d7e4c1a9f10">
+        <RegistryKey Root="HKLM" Key="Software\Classes\Directory\shell\Spelunker">
+          <RegistryValue Type="string" Value="Search with Spelunker" KeyPath="yes" />
+          <RegistryValue Type="string" Name="Icon" Value="&quot;[INSTALLDIR]Spelunker.exe&quot;,0" />
+          <RegistryKey Key="command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Spelunker.exe&quot; &quot;%1.&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Directory\Background\shell\Spelunker">
+          <RegistryValue Type="string" Value="Search with Spelunker" />
+          <RegistryValue Type="string" Name="Icon" Value="&quot;[INSTALLDIR]Spelunker.exe&quot;,0" />
+          <RegistryKey Key="command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Spelunker.exe&quot; &quot;%V.&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <RegistryKey Root="HKLM" Key="Software\Classes\Drive\shell\Spelunker">
+          <RegistryValue Type="string" Value="Search with Spelunker" />
+          <RegistryValue Type="string" Name="Icon" Value="&quot;[INSTALLDIR]Spelunker.exe&quot;,0" />
+          <RegistryKey Key="command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Spelunker.exe&quot; &quot;%1.&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- The This PC icon. It is not a folder, so the command passes the words that mean every drive. -->
+        <RegistryKey Root="HKLM" Key="Software\Classes\CLSID\{20D04FE0-3AEA-1069-A2D8-08002B30309D}\shell\Spelunker">
+          <RegistryValue Type="string" Value="Search all drives with Spelunker" />
+          <RegistryValue Type="string" Name="Icon" Value="&quot;[INSTALLDIR]Spelunker.exe&quot;,0" />
+          <RegistryKey Key="command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLDIR]Spelunker.exe&quot; &quot;This PC&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>
