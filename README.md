@@ -40,7 +40,7 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
 - **Real Windows integration.** Right-click a result for the genuine Windows context menu, with Spelunker's own entries (open containing folder, copy path, copy name, copy matching lines) on top. Right-click a folder, a drive, or **This PC** in Explorer and choose **Search with Spelunker**.
 - **Your columns, your way.** Resize, reorder, show or hide columns, and let them fill the window automatically. Dates follow your Windows regional format.
-- **13 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows.
+- **12 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows.
 - **Keyboard first.** Every pane, column, and splitter works without a mouse. Press `F1` in the app for the full list.
 
 ## Install
