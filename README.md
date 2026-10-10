@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/TheEndless/spelunker"><img alt="Repository" src="https://img.shields.io/badge/github-TheEndless%2Fspelunker-181717?logo=github"></a>
   <img alt="Visibility: private" src="https://img.shields.io/badge/repo-private-lightgrey">
-  <img alt="Version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-blue">
+  <a href="https://github.com/TheEndless/spelunker/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v1.0.0-blue"></a>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows11&logoColor=white">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
@@ -45,14 +45,17 @@ Spelunker is built for the two searches done every day: **text inside files** an
 
 ## Install
 
-Installers are built locally (see [Build](#build)) and land in `target/release/bundle`:
+Download a package from the [latest release](https://github.com/TheEndless/spelunker/releases/latest):
 
 | Package | For |
 | --- | --- |
-| NSIS setup (`*-setup.exe`) | A per-user install with no administrator prompt. Registers the Explorer right-click entries. |
-| MSI (`*.msi`) | A per-machine install. Registers the Explorer right-click entries for all users. |
+| `Spelunker_<version>_x64-setup.exe` | A per-user install with no administrator prompt. Registers the Explorer right-click entries. |
+| `Spelunker_<version>_x64_en-US.msi` | A per-machine install. Registers the Explorer right-click entries for all users. |
+| `Spelunker-<version>-portable.exe` | No install. |
 
-A portable `Spelunker.exe` also works. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
+The packages are not code-signed, so Windows SmartScreen may warn on first run. To build them yourself, see [Build](#build).
+
+The portable exe needs no installer. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
 
 ## Using Spelunker
 
@@ -141,7 +144,7 @@ The interface never touches the disk. All file access lives in `spelunker-core`.
 
 ## Clean-room note
 
-Spelunker was built from its own specification and first-hand experience as a user of file-search tools. No code, binaries, icons, artwork, wording, or screenshots from any other product were used.
+Spelunker was built from first-hand experience as a user of file-search tools. No code, binaries, icons, artwork, wording, or screenshots from any other product were used.
 
 ## License
 
