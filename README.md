@@ -14,7 +14,7 @@
   <img alt="Visibility: private" src="https://img.shields.io/badge/repo-private-lightgrey">
   <img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-blue">
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows11&logoColor=white">
-  <img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
 
 <p align="center">
@@ -152,4 +152,4 @@ Spelunker was built from its own specification and first-hand experience as a us
 
 ## License
 
-MIT, as declared in `Cargo.toml`.
+Released under the [MIT License](LICENSE). The dependencies it builds on are permissively licensed too (MIT, Apache-2.0, or Unlicense).
