@@ -142,10 +142,6 @@ cargo run -p spelunker-cli -- -l <folder> -n "*.rs" -t "text" [-c] [-w] [-r]
 
 The interface never touches the disk. All file access lives in `spelunker-core`.
 
-## Clean-room note
-
-Spelunker was built from first-hand experience as a user of file-search tools. No code, binaries, icons, artwork, wording, or screenshots from any other product were used.
-
 ## License
 
 Released under the [MIT License](LICENSE). The dependencies it builds on are permissively licensed too (MIT, Apache-2.0, or Unlicense).
