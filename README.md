@@ -139,13 +139,6 @@ cargo run -p spelunker-cli -- -l <folder> -n "*.rs" -t "text" [-c] [-w] [-r]
 
 The interface never touches the disk. All file access lives in `spelunker-core`.
 
-## Documentation
-
-- [docs/SPEC.md](docs/SPEC.md): the product specification and source of truth.
-- [docs/DESIGN.md](docs/DESIGN.md): the design direction and visual language.
-- [docs/UX_REVIEW.md](docs/UX_REVIEW.md): the usability and accessibility review.
-- [docs/NOTES.md](docs/NOTES.md): decisions made along the way.
-
 ## Clean-room note
 
 Spelunker was built from its own specification and first-hand experience as a user of file-search tools. No code, binaries, icons, artwork, wording, or screenshots from any other product were used.
