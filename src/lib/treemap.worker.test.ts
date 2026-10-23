@@ -81,6 +81,16 @@ describe('treemap worker', () => {
     });
   });
 
+  describe('the surface of a layout', () => {
+    it('is cut to four values per rectangle and travels in a buffer of its own', () => {
+      load([record(1, 'C:\\a', 10), record(2, 'C:\\a', 5), record(3, 'C:\\b', 20)]);
+      const reply = layout();
+      expect(reply.layout.surface.length).toBe(reply.layout.count * 4);
+      const buffers = Object.values(reply.layout).filter(ArrayBuffer.isView).map((view) => view.buffer);
+      expect(new Set(buffers).size).toBe(buffers.length);
+    });
+  });
+
   describe('zoom fallback', () => {
     beforeEach(() =>
       load([

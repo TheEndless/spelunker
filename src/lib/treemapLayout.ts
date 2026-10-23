@@ -1,4 +1,5 @@
 import { FILE_CATEGORIES } from './fileKinds';
+import { addRidge, CUSHION_HEIGHT, CUSHION_SCALE } from './treemapCushion';
 import type { FolderNode, TreeFile } from './treemapTree';
 
 export type Metric = 'size' | 'matches';
@@ -51,6 +52,8 @@ export interface Layout {
   weight: Float64Array;
   fileCount: Uint32Array;
   folderId: Int32Array;
+  /** Four cushion coefficients [sx1, sx2, sy1, sy2] per rectangle, in emit order. */
+  surface: Float32Array;
   frameCount: number;
   frameX: Float32Array;
   frameY: Float32Array;
@@ -80,6 +83,9 @@ const SUBTREE_FOLDERS = 3;
 const CATEGORY_START = 4;
 const AGE_START = CATEGORY_START + CATEGORY_COUNT;
 const SUMMARY_STRIDE = AGE_START + AGE_BUCKET_COUNT;
+
+/** How many rectangles' coefficients the surface holds before it first grows. */
+const SURFACE_START_RECTS = 4096;
 
 /** What a small-files group shows, worked out when the group is made. */
 interface GroupSummary {
@@ -245,6 +251,8 @@ export function layoutTree(
     weight: new Float64Array(capacity),
     fileCount: new Uint32Array(capacity),
     folderId: new Int32Array(capacity),
+    // Grown on demand in `emit`: sized for the worst case it would cost a measurable share of the layout time.
+    surface: new Float32Array(SURFACE_START_RECTS * 4),
     frameCount: 0,
     frameX: new Float32Array(counts.folders + 1),
     frameY: new Float32Array(counts.folders + 1),
@@ -266,12 +274,21 @@ export function layoutTree(
   const emit = (
     kind: number, id: number, x: number, y: number, w: number, h: number, depth: number,
     category: number, age: number, weight: number, fileCount: number, folderId: number,
+    inherited: ArrayLike<number>,
   ) => {
     const i = layout.count++;
     layout.x[i] = x; layout.y[i] = y; layout.w[i] = w; layout.h[i] = h;
     layout.id[i] = id; layout.kind[i] = kind; layout.depth[i] = Math.min(depth, 255);
     layout.category[i] = category; layout.age[i] = age; layout.weight[i] = weight;
     layout.fileCount[i] = fileCount; layout.folderId[i] = folderId;
+    // The rectangle is a cushion of its own on top of the folders around it.
+    if (i * 4 + 4 > layout.surface.length) {
+      const grown = new Float32Array(Math.min(capacity, layout.surface.length / 4 * 2) * 4);
+      grown.set(layout.surface);
+      layout.surface = grown;
+    }
+    for (let k = 0; k < 4; k++) layout.surface[i * 4 + k] = inherited[k];
+    addRidge(layout.surface, i * 4, x, y, x + w, y + h, CUSHION_HEIGHT * CUSHION_SCALE ** (depth + 1));
   };
 
   const emitFrame = (folderId: number, x: number, y: number, w: number, h: number) => {
@@ -280,7 +297,8 @@ export function layoutTree(
     layout.frameFolderId[i] = folderId;
   };
 
-  const fill = (node: FolderNode, row: number, x: number, y: number, w: number, h: number, depth: number) => {
+  /** `inherited` holds the coefficients of the folders around `node`. It is only read, never kept. */
+  const fill = (node: FolderNode, row: number, x: number, y: number, w: number, h: number, depth: number, inherited: ArrayLike<number>) => {
     const items: Item[] = [];
     for (const file of node.files) {
       const weight = weightOf(file, metric);
@@ -328,12 +346,12 @@ export function layoutTree(
       if (item.file) {
         emit(
           RectKind.File, item.file.id, itemX, itemY, itemWidth, itemHeight, depth,
-          item.file.category, ageBucket(item.file.modifiedMs, now), item.weight, 1, node.id,
+          item.file.category, ageBucket(item.file.modifiedMs, now), item.weight, 1, node.id, inherited,
         );
       } else if (item.group) {
         emit(
           RectKind.SmallFiles, node.id, itemX, itemY, itemWidth, itemHeight, depth,
-          item.group.category, item.group.age, item.weight, item.group.files, node.id,
+          item.group.category, item.group.age, item.weight, item.group.files, node.id, inherited,
         );
       } else {
         const child = item.folder!;
@@ -342,18 +360,23 @@ export function layoutTree(
           emit(
             RectKind.FolderBlock, child.id, itemX, itemY, itemWidth, itemHeight, depth,
             indexOfLargest(slab, base + CATEGORY_START, CATEGORY_COUNT), indexOfLargest(slab, base + AGE_START, AGE_BUCKET_COUNT),
-            item.weight, slab[base + FILES], node.id,
+            item.weight, slab[base + FILES], node.id, inherited,
           );
           return;
         }
         emitFrame(child.id, itemX, itemY, itemWidth, itemHeight);
         const gap = itemWidth >= insetMinSide && itemHeight >= insetMinSide ? inset : 0;
-        fill(child, item.folderRow, itemX + gap, itemY + gap, itemWidth - 2 * gap, itemHeight - 2 * gap, depth + 1);
+        // The frame's ridge spans its outer rectangle, before the gap. Each descended folder owns its
+        // coefficients because its siblings go on reading theirs after it returns.
+        const childSurface = new Float64Array(4);
+        for (let k = 0; k < 4; k++) childSurface[k] = inherited[k];
+        addRidge(childSurface, 0, itemX, itemY, itemX + itemWidth, itemY + itemHeight, CUSHION_HEIGHT * CUSHION_SCALE ** depth);
+        fill(child, item.folderRow, itemX + gap, itemY + gap, itemWidth - 2 * gap, itemHeight - 2 * gap, depth + 1, childSurface);
       }
     });
   };
 
   emitFrame(root.id, 0, 0, width, height);
-  fill(root, 0, 0, 0, width, height, 0);
+  fill(root, 0, 0, 0, width, height, 0, [0, 0, 0, 0]);
   return layout;
 }

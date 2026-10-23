@@ -40,6 +40,7 @@ function trim(layout: Layout): Layout {
     id: layout.id.slice(0, count), kind: layout.kind.slice(0, count), depth: layout.depth.slice(0, count),
     category: layout.category.slice(0, count), age: layout.age.slice(0, count), weight: layout.weight.slice(0, count),
     fileCount: layout.fileCount.slice(0, count), folderId: layout.folderId.slice(0, count),
+    surface: layout.surface.slice(0, count * 4),
     frameX: layout.frameX.slice(0, frameCount), frameY: layout.frameY.slice(0, frameCount),
     frameW: layout.frameW.slice(0, frameCount), frameH: layout.frameH.slice(0, frameCount),
     frameFolderId: layout.frameFolderId.slice(0, frameCount),
