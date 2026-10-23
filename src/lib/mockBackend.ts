@@ -32,7 +32,10 @@ function fakeRow(index: number, withHits: boolean): ResultRow {
   };
 }
 
-/** The deep fixture's file types, with images and archives so the map shows more than code and text. */
+/**
+ * The deep fixture's file types, with images and archives so the map shows more than code and text,
+ * and an extension no category knows, so it shows Other too.
+ */
 const DEEP_TYPES: [string, string][] = [
   ['rs', 'Rust Source File'],
   ['ts', 'TypeScript Source File'],
@@ -41,6 +44,7 @@ const DEEP_TYPES: [string, string][] = [
   ['png', 'PNG File'],
   ['zip', 'Compressed (zipped) Folder'],
   ['json', 'JSON Source File'],
+  ['dat', 'DAT File'],
 ];
 
 /** A deterministic path in a deep, uneven tree: the number of levels and the fan-out vary by index. */

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { fileCategory } from './fileKinds';
 import { deepPath, deepRow } from './mockBackend';
 
 describe('deepPath', () => {
@@ -40,6 +41,13 @@ describe('deepRow', () => {
     const median = sizes[sizes.length / 2];
     const largest = sizes[sizes.length - 1];
     expect(largest).toBeGreaterThan(20 * median);
+  });
+
+  it('gives a share of files an unrecognised extension, so the map shows the Other category', () => {
+    const names = Array.from({ length: 1000 }, (_, index) => deepRow(index).path);
+    const others = names.filter((name) => fileCategory(name) === 'other').length;
+    expect(others).toBeGreaterThanOrEqual(100);
+    expect(others).toBeLessThan(200);
   });
 
   it('spreads modified dates over every age bucket the map knows (today to older)', () => {

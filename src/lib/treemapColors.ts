@@ -6,8 +6,16 @@ const CATEGORY_SATURATION = 0.7;
 const FILL_CONTRAST = 3;
 const LABEL_CONTRAST = 4.5;
 
-/** Hue in degrees for each category, in FILE_CATEGORIES order. "Other" is a neutral. */
-const CATEGORY_HUES = [212, 172, 78, 319, 14, 281, 247, 48, 192, 128, 345, 32, 0];
+/**
+ * Other is a cool blue-gray neutral, read as "unclassified". The earlier warm gray (hue 0) shaded to
+ * a muddy brown over large areas. Its hue sits near Code's (212), so it is told apart from Code by
+ * its low saturation alone: an OKLab chroma of 0.02 to 0.036 against Code's 0.085 to 0.16, at least
+ * 0.065 apart in every palette (Nord dark is the closest).
+ */
+const OTHER_HUE = 218;
+const OTHER_SATURATION = 0.14;
+/** Hue in degrees for each category, in FILE_CATEGORIES order. "Other" is the neutral above. */
+const CATEGORY_HUES = [212, 172, 78, 319, 14, 281, 247, 48, 192, 128, 345, 32, OTHER_HUE];
 /** Per-category lightness nudges, tuned so every pair stays at least 0.05 apart in OKLab after shading pulls dark-mode colors together. */
 const CATEGORY_LIGHTNESS_SHIFT = [0, 0.06, 0, 0.112, 0.014, 0.081, -0.046, 0, 0.06, -0.04, 0.028, 0.06, 0];
 const OTHER_INDEX = CATEGORY_HUES.length - 1;
@@ -120,7 +128,7 @@ export function mapColors(tokens: Tokens, mode: Mode): MapColors {
   const baseLightness = mode === 'dark' ? 0.6 : 0.72;
   const searchDirection = mode === 'dark' ? 1 : -1;
   const category = CATEGORY_HUES.map((hue, index) => {
-    const saturation = index === OTHER_INDEX ? 0.08 : CATEGORY_SATURATION;
+    const saturation = index === OTHER_INDEX ? OTHER_SATURATION : CATEGORY_SATURATION;
     const startLightness = baseLightness + CATEGORY_LIGHTNESS_SHIFT[index];
     // Raising HSL lightness keeps more of the hue's saturation than mixing toward white would.
     const fill = firstPassingFill(

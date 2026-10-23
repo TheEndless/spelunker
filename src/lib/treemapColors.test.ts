@@ -17,6 +17,14 @@ const MIN_AGE_STEP = 0.06;
 /** Today to Older are dated, in order. Unknown comes last. */
 const LAST_DATED_BUCKET = 4;
 const UNKNOWN_BUCKET = 5;
+const OTHER_CATEGORY = CATEGORY_LABELS.indexOf('Other');
+/**
+ * Other is a neutral, but a cool one: an OKLab hue on the blue side and a little chroma. A warm
+ * gray turned into a muddy brown under the cushion shading, and a plain gray looks dirty next to
+ * the colored categories.
+ */
+const OTHER_HUE_RANGE = [235, 275];
+const OTHER_CHROMA_RANGE = [0.015, 0.045];
 
 describe('mapColors', () => {
   for (const palette of PALETTES) {
@@ -64,6 +72,16 @@ describe('mapColors', () => {
               expect(perceptualDistance(colors.category[i], colors.category[j])).toBeGreaterThanOrEqual(MIN_CATEGORY_DISTANCE);
             }
           }
+        });
+
+        it('makes Other a cool blue-gray neutral, not a warm one that shades to brown', () => {
+          const [, greenRed, blueYellow] = oklab(colors.category[OTHER_CATEGORY]);
+          const hueDegrees = ((Math.atan2(blueYellow, greenRed) * 180) / Math.PI + 360) % 360;
+          const chroma = Math.hypot(greenRed, blueYellow);
+          expect(hueDegrees, colors.category[OTHER_CATEGORY]).toBeGreaterThanOrEqual(OTHER_HUE_RANGE[0]);
+          expect(hueDegrees, colors.category[OTHER_CATEGORY]).toBeLessThanOrEqual(OTHER_HUE_RANGE[1]);
+          expect(chroma, colors.category[OTHER_CATEGORY]).toBeGreaterThanOrEqual(OTHER_CHROMA_RANGE[0]);
+          expect(chroma, colors.category[OTHER_CATEGORY]).toBeLessThanOrEqual(OTHER_CHROMA_RANGE[1]);
         });
 
         it('gives each category its own color', () => {
