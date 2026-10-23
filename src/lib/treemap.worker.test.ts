@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { PALETTES } from './palettes';
 import { handleMessage, type Send } from './treemap.worker';
+import { mapColors } from './treemapColors';
 import { RectKind, type Layout } from './treemapLayout';
 import type { FromWorker, ViewSettings } from './treemapMessages';
+import type { Shading } from './treemapPaint';
 import type { TreemapRecord } from './treemapTree';
 
 type LayoutReply = Extract<FromWorker, { type: 'layout' }>;
@@ -20,14 +23,29 @@ function load(records: TreemapRecord[]) {
   handleMessage({ type: 'add', records }, send);
 }
 
-const view = (zoomFolderId: number | null): ViewSettings => ({
+const view = (zoomFolderId: number | null, shading: Shading = 'cushion'): ViewSettings => ({
   width: 100, height: 100, devicePixelRatio: 1, metric: 'size', colorMode: 'type', zoomFolderId,
-  colors: {} as never, forced: null, font: '', dimmed: null,
+  colors: mapColors(PALETTES[0].dark, 'dark'), forced: null, font: '', dimmed: null, shading,
 });
 
-function layout(zoomFolderId: number | null = null): LayoutReply {
-  handleMessage({ type: 'layout', sequence: ++sequence, view: view(zoomFolderId) }, send);
+function layout(zoomFolderId: number | null = null, shading: Shading = 'cushion'): LayoutReply {
+  handleMessage({ type: 'layout', sequence: ++sequence, view: view(zoomFolderId, shading) }, send);
   return replies.at(-1) as LayoutReply;
+}
+
+/** A canvas whose context records the name of every drawing call, as the worker's canvas would receive them. */
+function recordingCanvas() {
+  const calls: string[] = [];
+  const record = (name: string) => () => void calls.push(name);
+  const context = {
+    fillStyle: '', strokeStyle: '', globalAlpha: 1, font: '', textBaseline: '', lineWidth: 1,
+    setTransform: record('setTransform'), fillRect: record('fillRect'), strokeRect: record('strokeRect'), fillText: record('fillText'),
+    measureText: (text: string) => ({ width: text.length * 6 }),
+    createImageData: (width: number, height: number) => ({ width, height, data: new Uint8ClampedArray(width * height * 4) }),
+    putImageData: record('putImageData'),
+  };
+  const canvas = { width: 0, height: 0, getContext: () => context } as unknown as OffscreenCanvas;
+  return { canvas, calls };
 }
 
 function locate(fileId: number) {
@@ -88,6 +106,60 @@ describe('treemap worker', () => {
       expect(reply.layout.surface.length).toBe(reply.layout.count * 4);
       const buffers = Object.values(reply.layout).filter(ArrayBuffer.isView).map((view) => view.buffer);
       expect(new Set(buffers).size).toBe(buffers.length);
+    });
+  });
+
+  describe('shading', () => {
+    beforeEach(() =>
+      load([record(1, 'C:\\a\\one', 100), record(2, 'C:\\a\\one', 60), record(3, 'C:\\a\\two', 100), record(4, 'C:\\a\\two', 40)]),
+    );
+
+    /** For each framed folder below the laid-out one, how far its leftmost and topmost rectangles sit inside its frame. */
+    function insetsOf(reply: LayoutReply): number[] {
+      const result = reply.layout;
+      const insets: number[] = [];
+      for (let frame = 1; frame < result.frameCount; frame++) {
+        let left = Infinity;
+        let top = Infinity;
+        for (let rect = 0; rect < result.count; rect++) {
+          if (result.folderId[rect] !== result.frameFolderId[frame]) continue;
+          left = Math.min(left, result.x[rect]);
+          top = Math.min(top, result.y[rect]);
+        }
+        insets.push(left - result.frameX[frame], top - result.frameY[frame]);
+      }
+      return insets;
+    }
+
+    it('lays out with no gap inside folders for cushion shading, since the shading separates them', () => {
+      const insets = insetsOf(layout(null, 'cushion'));
+      expect(insets).toHaveLength(4);
+      for (const inset of insets) expect(inset).toBeCloseTo(0, 5);
+    });
+
+    it('keeps the one-pixel gap inside folders for flat shading', () => {
+      const insets = insetsOf(layout(null, 'flat'));
+      expect(insets).toHaveLength(4);
+      for (const inset of insets) expect(inset).toBeCloseTo(1, 5);
+    });
+
+    it('paints with the painter the shading names', () => {
+      const painted = (shading: Shading) => {
+        const { canvas, calls } = recordingCanvas();
+        handleMessage({ type: 'attach', canvas }, send);
+        try {
+          expect(layout(null, shading).painted).toBe(true);
+        } finally {
+          handleMessage({ type: 'attach', canvas: { getContext: () => null } as unknown as OffscreenCanvas }, send);
+        }
+        return calls;
+      };
+      const cushion = painted('cushion');
+      expect(cushion).toContain('putImageData');
+      expect(cushion).not.toContain('fillRect');
+      const flat = painted('flat');
+      expect(flat).toContain('fillRect');
+      expect(flat).not.toContain('putImageData');
     });
   });
 

@@ -437,6 +437,7 @@
             themeVersion={`${preferences.theme}|${preferences.palette}|${preferences.highlightColor}`}
             metric={effectiveMetric}
             colorMode={preferences.mapColor}
+            shading={preferences.mapShading}
             {canUseMatches}
             {selectedPath}
             onMetric={(metric) => {

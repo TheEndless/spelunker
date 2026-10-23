@@ -6,6 +6,7 @@ import { DEFAULT_EDITOR, normalizeEditor, type EditorSettings } from './editors'
 import { parseRoots } from './request';
 import { TOKEN_NAMES, PALETTES, accentTextFor, placeholderColorFor, tokensFor } from './palettes';
 import { resolveTheme } from './theme';
+import type { Shading } from './treemapPaint';
 import type { ThemePreference } from './types';
 
 const STORAGE_KEY = 'spelunker.preferences.v1';
@@ -31,6 +32,7 @@ interface Stored {
   mapHeight: number | null;
   mapMetric: 'size' | 'matches';
   mapColor: 'type' | 'age';
+  mapShading: Shading;
 }
 
 /** A stored highlight color is used only if it is a real hex color. */
@@ -58,6 +60,7 @@ function load(): Stored {
     mapHeight: null,
     mapMetric: 'size',
     mapColor: 'type',
+    mapShading: 'cushion',
   };
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
@@ -81,6 +84,7 @@ function load(): Stored {
       mapHeight: normalizeMapHeight(raw.mapHeight),
       mapMetric: raw.mapMetric === 'matches' ? 'matches' : 'size',
       mapColor: raw.mapColor === 'age' ? 'age' : 'type',
+      mapShading: raw.mapShading === 'flat' ? 'flat' : 'cushion',
     };
   } catch {
     // Storage can be unavailable or corrupt. Start from defaults.
@@ -105,6 +109,7 @@ export class Preferences {
   mapHeight = $state<number | null>(null);
   mapMetric = $state<'size' | 'matches'>('size');
   mapColor = $state<'type' | 'age'>('type');
+  mapShading = $state<Shading>('cushion');
 
   constructor() {
     Object.assign(this, load());
@@ -159,6 +164,7 @@ export class Preferences {
       mapHeight: this.mapHeight,
       mapMetric: this.mapMetric,
       mapColor: this.mapColor,
+      mapShading: this.mapShading,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));

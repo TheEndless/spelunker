@@ -9,7 +9,7 @@ const row = (id: number, folder = 'C:\\a'): DisplayRow => ({
 
 const view = (width = 100) => ({
   width, height: 100, devicePixelRatio: 1, metric: 'size' as const, colorMode: 'type' as const,
-  colors: {} as never, forced: null, font: '', dimmed: null,
+  colors: {} as never, forced: null, font: '', dimmed: null, shading: 'cushion' as const,
 });
 
 const layoutReply = (sequence: number) => ({
@@ -165,6 +165,24 @@ describe('TreemapClient', () => {
     worker.onmessage!({ data: { ...layoutReply(sequence), elapsedMs: { layout: 12, paint: 3 } } } as MessageEvent);
     expect(client.lastTimings).toMatchObject({ layout: 12, paint: 3 });
     expect(client.lastTimings!.index).toBeGreaterThanOrEqual(0);
+  });
+
+  it('sends the shading with the view, and a shading change lays out again and drops the reply made for the old one', () => {
+    const { client, worker, canvas, layoutPosts, answer } = setup();
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(100);
+    expect(layoutPosts()[0].view.shading).toBe('cushion');
+
+    // Switched while the cushion layout is in flight: its reply belongs to the old view and is not shown.
+    client.setView({ ...view(), shading: 'flat' });
+    vi.advanceTimersByTime(100);
+    worker.onmessage!({ data: layoutReply(layoutPosts()[0].sequence) } as MessageEvent);
+    expect(client.layout).toBeNull();
+    expect(layoutPosts()).toHaveLength(2);
+    expect(layoutPosts()[1].view.shading).toBe('flat');
+    answer();
+    expect(client.layout).not.toBeNull();
   });
 
   it('ignores a layout reply older than the latest request', () => {

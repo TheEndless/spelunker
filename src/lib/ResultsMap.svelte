@@ -27,7 +27,7 @@
   import { forcedMapColors, mapColors } from './treemapColors';
   import type { Direction } from './treemapIndex';
   import { RectKind, type Layout, type Metric } from './treemapLayout';
-  import { paintLayout, snapToDevicePixel, type ColorMode } from './treemapPaint';
+  import { paintMap, snapToDevicePixel, type ColorMode, type PaintStyle, type Shading } from './treemapPaint';
   import type { DisplayRow } from './types';
 
   interface Props {
@@ -38,6 +38,7 @@
     themeVersion: string;
     metric: Metric;
     colorMode: ColorMode;
+    shading: Shading;
     /** Matches needs Containing text. */
     canUseMatches: boolean;
     selectedPath: string | null;
@@ -56,6 +57,7 @@
     themeVersion,
     metric,
     colorMode,
+    shading,
     canUseMatches,
     selectedPath,
     onMetric,
@@ -201,6 +203,7 @@
       forced,
       font,
       dimmed: shownKey === '' ? null : shownKey.split(',').map(Number),
+      shading,
     };
     untrack(() => client.setView(view));
   });
@@ -223,9 +226,9 @@
     const context = baseCanvas.getContext('2d');
     if (!context) return;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    const style = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio, shading: 'flat' as const };
+    const style: PaintStyle = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio, shading };
     const dimmed = shownBuckets.size > 0 ? shownBuckets : null;
-    paintLayout(context, current, width, height, style, dimmed, (rect) => session.rowById(current.id[rect])?.name ?? '');
+    paintMap(context, current, width, height, style, dimmed, (rect) => session.rowById(current.id[rect])?.name ?? '');
   });
 
   // ---- selection

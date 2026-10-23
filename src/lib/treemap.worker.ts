@@ -4,7 +4,7 @@
 import { bestTextOn } from './colors';
 import { layoutTree, RectKind, type Layout, type Metric } from './treemapLayout';
 import type { Crumb, FromWorker, ToWorker, ViewSettings } from './treemapMessages';
-import { paintLayout, type PaintStyle } from './treemapPaint';
+import { paintMap, type PaintStyle } from './treemapPaint';
 import { ancestorsOf, collapseChain, folderPathLabel, FolderTree, type FolderNode } from './treemapTree';
 
 /** Posts a reply to the page, handing over the listed buffers. */
@@ -86,8 +86,11 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   const root = resolveRoot(view.zoomFolderId);
   lastZoomRoot = root;
   lastMetric = view.metric;
+  // Cushion shading darkens every tile's edges, which keeps neighbours apart, and a background gap
+  // inside each folder would show as a grid of flat lines. Flat fills need the gap.
   const full = layoutTree(root, { files: tree.fileCount, folders: tree.folderCount }, {
     width: view.width, height: view.height, metric: view.metric, now: startedAt,
+    inset: view.shading === 'cushion' ? 0 : undefined,
   });
 
   let painted = false;
@@ -99,9 +102,9 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
     context.setTransform(view.devicePixelRatio, 0, 0, view.devicePixelRatio, 0, 0);
     const style: PaintStyle = {
       colors: view.colors, colorMode: view.colorMode, forced: view.forced, font: view.font, labelColorFor: bestTextOn,
-      pixelRatio: view.devicePixelRatio, shading: 'flat',
+      pixelRatio: view.devicePixelRatio, shading: view.shading,
     };
-    paintLayout(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null, (rect) => nameOfRect(full, rect));
+    paintMap(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null, (rect) => nameOfRect(full, rect));
     painted = true;
     paintMs = performance.now() - paintStarted;
   }

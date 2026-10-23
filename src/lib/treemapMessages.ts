@@ -1,6 +1,6 @@
 import type { ForcedColors, MapColors } from './treemapColors';
 import type { Layout, Metric } from './treemapLayout';
-import type { ColorMode } from './treemapPaint';
+import type { ColorMode, Shading } from './treemapPaint';
 import type { TreemapRecord } from './treemapTree';
 
 /** Everything that decides what the map looks like, apart from the results themselves. */
@@ -17,6 +17,8 @@ export interface ViewSettings {
   font: string;
   /** Color buckets shown at full strength, or null when nothing is dimmed. */
   dimmed: number[] | null;
+  /** Cushion is laid out with no gap inside folders and lit per pixel. Flat keeps the gap and plain fills. */
+  shading: Shading;
 }
 
 export type ToWorker =

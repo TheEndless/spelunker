@@ -5,6 +5,7 @@
   import { focusScope } from './focusScope';
   import Icon from './Icon.svelte';
   import type { Preferences } from './preferences.svelte';
+  import type { Shading } from './treemapPaint';
 
   interface Props {
     preferences: Preferences;
@@ -14,6 +15,10 @@
   let { preferences, onClose }: Props = $props();
 
   const FALLBACK_HIGHLIGHT = '#FFE08A';
+  const SHADING_CHOICES: { id: Shading; label: string }[] = [
+    { id: 'cushion', label: 'Cushion' },
+    { id: 'flat', label: 'Flat' },
+  ];
   const MAX_CONTEXT_LINES = 20;
 
   let dialog: HTMLDivElement;
@@ -46,6 +51,11 @@
 
   function chooseEditor(id: (typeof EDITOR_CHOICES)[number]['id']) {
     preferences.editor = { ...preferences.editor, id };
+    preferences.save();
+  }
+
+  function chooseShading(shading: Shading) {
+    preferences.mapShading = shading;
     preferences.save();
   }
 
@@ -173,6 +183,24 @@
           onchange={(event) => setContextLines(Number(event.currentTarget.value))}
         />
       </label>
+    </section>
+
+    <section aria-labelledby="shading-heading">
+      <h3 id="shading-heading">Map shading</h3>
+      <div class="choices" role="radiogroup" aria-labelledby="shading-heading">
+        {#each SHADING_CHOICES as candidate (candidate.id)}
+          <label>
+            <input
+              type="radio"
+              name="map-shading"
+              checked={preferences.mapShading === candidate.id}
+              onchange={() => chooseShading(candidate.id)}
+            />
+            {candidate.label}
+          </label>
+        {/each}
+      </div>
+      <p class="help">Cushion lights each tile from the top left, so files and folders stand apart. Flat fills each tile with one color.</p>
     </section>
 
     <section aria-labelledby="explorer-heading">
