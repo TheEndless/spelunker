@@ -109,6 +109,17 @@ describe('TreemapClient', () => {
     expect(client.index).not.toBeNull();
   });
 
+  it('reports the worker timings with the time it took to build the hit index', () => {
+    const { client, worker, posted, canvas } = setup();
+    client.attach(canvas);
+    client.setView(view());
+    vi.advanceTimersByTime(100);
+    const sequence = posted.map((entry) => entry.message).filter((message) => message.type === 'layout').at(-1).sequence;
+    worker.onmessage!({ data: { ...layoutReply(sequence), elapsedMs: { layout: 12, paint: 3 } } } as MessageEvent);
+    expect(client.lastTimings).toMatchObject({ layout: 12, paint: 3 });
+    expect(client.lastTimings!.index).toBeGreaterThanOrEqual(0);
+  });
+
   it('ignores a layout reply older than the latest request', () => {
     const { client, worker, canvas } = setup();
     client.attach(canvas);

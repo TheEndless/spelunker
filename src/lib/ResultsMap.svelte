@@ -3,7 +3,7 @@
   export interface MapProbe {
     rects(count: number): { fileId: number; x: number; y: number; width: number; height: number }[];
     indexAt(x: number, y: number): { index: number; kind: 'file' | 'small-files' | 'folder-block' | null };
-    timings(): { layout: number; paint: number } | null;
+    timings(): { layout: number; paint: number; index: number } | null;
   }
 
   declare global {

@@ -2,52 +2,12 @@
 // and in hand-sized mode. It runs the page in headless Edge against the dev server (mock backend),
 // because that reports resizes the way a real window does, and needs no Spelunker window.
 // Usage: start the dev server (npm run dev), then: node fill.mjs
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { launchHeadlessEdge } from './headless.mjs';
+import { createChecker, openPage } from './page.mjs';
 
-const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const port = 9341;
-const profile = mkdtempSync(join(tmpdir(), 'spelunker-fill-'));
-const browser = spawn(edge, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=1280,780', 'about:blank'], { stdio: 'ignore' });
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-let targets;
-for (let attempt = 0; attempt < 40; attempt++) {
-  try {
-    targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    if (targets.some((target) => target.type === 'page')) break;
-  } catch {
-    // The browser is still starting.
-  }
-  await sleep(250);
-}
-const page = targets.find((target) => target.type === 'page');
-const socket = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((resolve) => (socket.onopen = resolve));
-let nextId = 1;
-const pending = new Map();
-socket.onmessage = (message) => {
-  const data = JSON.parse(message.data);
-  if (data.id && pending.has(data.id)) pending.get(data.id)(data);
-};
-const send = (method, params = {}) =>
-  new Promise((resolve) => {
-    const id = nextId++;
-    pending.set(id, resolve);
-    socket.send(JSON.stringify({ id, method, params }));
-  });
-const ev = async (expression) => {
-  const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-  if (reply.result.exceptionDetails) return { exception: reply.result.exceptionDetails.exception?.description ?? reply.result.exceptionDetails.text };
-  return reply.result.result.value;
-};
-const results = [];
-const check = (name, ok, detail = '') => {
-  results.push(Boolean(ok));
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  -> ' + JSON.stringify(detail)}`);
-};
+const edge = await launchHeadlessEdge({ port: 9341, width: 1280, height: 780, name: 'fill' });
+const { send, sleep, ev, close } = await openPage({ webSocketDebuggerUrl: edge.webSocketDebuggerUrl });
+const { check, summarize } = createChecker();
 const resizeTo = async (width, height) => {
   await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
   await sleep(400);
@@ -117,13 +77,6 @@ await sleep(700);
 const afterHide = await fill();
 check('hiding the preview widens the columns to the full width', fills(afterHide) && afterHide.total > beforeHide.total + 300, { beforeHide, afterHide });
 
-const failed = results.filter((ok) => !ok).length;
-console.log(`\n${results.length - failed} of ${results.length} checks passed`);
-socket.close();
-browser.kill();
-await sleep(500);
-try {
-  rmSync(profile, { recursive: true, force: true });
-} catch {
-  // Edge may still hold the folder for a moment. It is in the temp folder either way.
-}
+summarize();
+close();
+await edge.stop();

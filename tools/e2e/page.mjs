@@ -12,12 +12,17 @@ const keyCode = (name) => KEY_CODES[name] ?? name.toUpperCase().charCodeAt(0);
 
 /**
  * Connects to the running app. `port` is the debug port the app was started with (see launch.ps1).
+ * `webSocketDebuggerUrl` picks one page directly instead (see headless.mjs). `onEvent` receives
+ * every protocol event, such as console messages once `Runtime.enable` was sent.
  * Everything returned acts on the app's own page. Nothing here sends input to the desktop.
  */
-export async function openPage({ port = 9222 } = {}) {
-  const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-  const page = targets.find((target) => target.type === 'page');
-  const socket = new WebSocket(page.webSocketDebuggerUrl);
+export async function openPage({ port = 9222, webSocketDebuggerUrl = null, onEvent = null } = {}) {
+  let address = webSocketDebuggerUrl;
+  if (!address) {
+    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+    address = targets.find((target) => target.type === 'page').webSocketDebuggerUrl;
+  }
+  const socket = new WebSocket(address);
   await new Promise((resolve) => (socket.onopen = resolve));
 
   let nextId = 1;
@@ -25,6 +30,7 @@ export async function openPage({ port = 9222 } = {}) {
   socket.onmessage = (message) => {
     const data = JSON.parse(message.data);
     if (data.id && pending.has(data.id)) pending.get(data.id)(data);
+    else if (data.method && onEvent) onEvent(data);
   };
 
   const send = (method, params = {}) =>

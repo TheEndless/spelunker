@@ -39,7 +39,8 @@ export class TreemapClient {
   zoomFolderId = $state<number | null>(null);
   /** A layout has been requested and its answer has not arrived yet. */
   busy = $state(false);
-  lastTimings = $state.raw<{ layout: number; paint: number } | null>(null);
+  /** Milliseconds the worker spent laying out and painting the current picture, and the page building its hit index. */
+  lastTimings = $state.raw<{ layout: number; paint: number; index: number } | null>(null);
   /** The worker painted the base canvas itself. When false the page must paint from `layout`. */
   workerPaints = $state(false);
 
@@ -187,12 +188,15 @@ export class TreemapClient {
       // Replies come back in order. One made for an earlier view is out of date, but one made
       // before a mere tick is not: dropping those would starve the map while layouts are slow.
       if (requestedFor !== this.viewVersion) return;
+      const indexStarted = performance.now();
+      const index = this.view ? new LayoutIndex(message.layout, this.view.width, this.view.height) : null;
+      const indexMs = performance.now() - indexStarted;
       this.layout = message.layout;
-      this.index = this.view ? new LayoutIndex(message.layout, this.view.width, this.view.height) : null;
+      this.index = index;
       this.crumbs = message.crumbs;
       this.largestFolder = message.largestFolder;
       this.zoomFolderId = message.zoomFolderId;
-      this.lastTimings = message.elapsedMs;
+      this.lastTimings = { ...message.elapsedMs, index: indexMs };
       return;
     }
     const resolve = this.waiting.get(message.requestId);
