@@ -54,7 +54,15 @@ export class TreemapClient {
   private viewVersion = 0;
   private readonly viewVersionOfSequence = new Map<number, number>();
   private requestCounter = 0;
-  private pendingAdds: TreemapRecord[] = [];
+  /**
+   * The worker lays out every request it is sent and cannot drop one that a later request made
+   * pointless, so only one is sent at a time. A request made meanwhile is remembered and sent, for
+   * the view as it is then, when the answer arrives.
+   */
+  private layoutInFlight = false;
+  private layoutWanted = false;
+  /** Rows were added or removed since the last layout request, so the next tick lays out again. */
+  private changedSinceLayout = false;
   private pendingRemoves: number[] = [];
   private tickTimer: ReturnType<typeof setInterval> | undefined;
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -66,22 +74,23 @@ export class TreemapClient {
     private readonly session: Pick<SearchSession, 'rows' | 'running' | 'subscribe'>,
     private readonly createWorker: () => WorkerLike = createModuleWorker,
   ) {
-    // While attached, changes wait for the next layout so each tick sends one batch. While
-    // detached they go straight to the worker, which keeps its tree current without laying out.
+    // Each batch of rows goes to the worker as it arrives, so the cost of copying it is spread over
+    // the search instead of piling up into one task per tick. Removals come one row at a time, so
+    // while attached they wait for the next layout and go as one message. Detached, they go at once.
     const listener: SessionListener = {
       appended: (rows) => {
         if (!this.worker) return;
-        for (const row of rows) this.pendingAdds.push(toRecord(row));
-        if (!this.attached) this.flushChanges();
+        this.postAdds(rows.map(toRecord));
+        this.changedSinceLayout = true;
       },
       removed: (id) => {
         if (!this.worker) return;
         this.pendingRemoves.push(id);
-        if (!this.attached) this.flushChanges();
+        this.changedSinceLayout = true;
+        if (!this.attached) this.flushRemoves();
       },
       reset: (startedAtMs) => {
         this.startedAtMs = startedAtMs;
-        this.pendingAdds = [];
         this.pendingRemoves = [];
         this.zoomFolderId = null;
         // The old picture names rows that no longer exist. The view and the attachment stay.
@@ -123,7 +132,7 @@ export class TreemapClient {
     this.attached = false;
     clearInterval(this.tickTimer);
     clearTimeout(this.viewTimer);
-    this.flushChanges();
+    this.flushRemoves();
   }
 
   setView(view: Omit<ViewSettings, 'zoomFolderId'>): void {
@@ -157,11 +166,10 @@ export class TreemapClient {
 
   private onTick(): void {
     const running = this.session.running;
-    // One more layout after the search finishes picks up the rows of its last batches. Rows still
-    // waiting count too: a search can start and finish between two ticks, and a row can be removed
-    // after the search, and neither is ever seen running here.
-    const hasPendingChanges = this.pendingAdds.length > 0 || this.pendingRemoves.length > 0;
-    if (running || this.wasRunning || hasPendingChanges) this.requestLayout();
+    // One more layout after the search finishes picks up the rows of its last batches. Changes
+    // since the last layout count too: a search can start and finish between two ticks, and a row
+    // can be removed after the search, and neither is ever seen running here.
+    if (running || this.wasRunning || this.changedSinceLayout) this.requestLayout();
     this.wasRunning = running;
   }
 
@@ -173,16 +181,30 @@ export class TreemapClient {
 
   private requestLayout(): void {
     if (!this.attached || !this.view || !this.worker) return;
-    this.flushChanges();
+    if (this.layoutInFlight) {
+      this.layoutWanted = true;
+      return;
+    }
+    this.flushRemoves();
+    this.changedSinceLayout = false;
     const sequence = ++this.sequence;
     this.viewVersionOfSequence.set(sequence, this.viewVersion);
     this.busy = true;
+    this.layoutInFlight = true;
     this.post({ type: 'layout', sequence, view: { ...this.view, zoomFolderId: this.zoomFolderId } });
   }
 
   private receive(message: FromWorker): void {
     if (message.type === 'layout') {
-      if (message.sequence === this.sequence) this.busy = false;
+      if (message.sequence === this.sequence) {
+        this.layoutInFlight = false;
+        if (this.layoutWanted) {
+          this.layoutWanted = false;
+          this.requestLayout();
+        } else {
+          this.busy = false;
+        }
+      }
       const requestedFor = this.viewVersionOfSequence.get(message.sequence);
       this.viewVersionOfSequence.delete(message.sequence);
       // Replies come back in order. One made for an earlier view is out of date, but one made
@@ -214,10 +236,8 @@ export class TreemapClient {
     });
   }
 
-  /** Sends the queued additions and removals to the worker. */
-  private flushChanges(): void {
-    this.postAdds(this.pendingAdds);
-    this.pendingAdds = [];
+  /** Sends the queued removals to the worker. */
+  private flushRemoves(): void {
     if (this.pendingRemoves.length > 0) {
       this.post({ type: 'remove', ids: this.pendingRemoves });
       this.pendingRemoves = [];

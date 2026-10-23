@@ -29,7 +29,11 @@ function setup() {
   };
   const client = new TreemapClient(session as never, createWorker);
   const canvas = { transferControlToOffscreen: () => ({}) } as unknown as HTMLCanvasElement;
-  return { client, session, worker, createWorker, posted, canvas, emit: () => listener };
+  const layoutPosts = () => posted.map((entry) => entry.message).filter((message) => message.type === 'layout');
+  /** Answers the latest layout request, as the worker would. */
+  const answer = (overrides: Record<string, unknown> = {}) =>
+    worker.onmessage!({ data: { ...layoutReply(layoutPosts().at(-1).sequence), ...overrides } } as MessageEvent);
+  return { client, session, worker, createWorker, posted, canvas, emit: () => listener, layoutPosts, answer };
 }
 
 const types = (posted: Array<{ message: any }>) => posted.map((entry) => entry.message.type);
@@ -61,17 +65,43 @@ describe('TreemapClient', () => {
     expect(posted[0].message).toEqual({ type: 'reset', now: 456 });
   });
 
-  it('batches appended rows into one add per flush', () => {
-    const { client, posted, canvas, emit } = setup();
+  it('posts each appended batch at once, so the tick posts only the layout', () => {
+    const { client, posted, canvas, emit, answer } = setup();
     client.setView(view());
     client.attach(canvas);
     vi.advanceTimersByTime(100);
+    answer();
     posted.length = 0;
     emit().appended([row(2)]);
+    expect(types(posted)).toEqual(['add']);
     emit().appended([row(3)]);
+    expect(types(posted)).toEqual(['add', 'add']);
+    expect(posted.map((entry) => entry.message.records.map((record: { id: number }) => record.id))).toEqual([[2], [3]]);
     vi.advanceTimersByTime(1300);
-    expect(types(posted)).toEqual(['add', 'layout']);
-    expect(posted[0].message.records.map((record: { id: number }) => record.id)).toEqual([2, 3]);
+    expect(types(posted)).toEqual(['add', 'add', 'layout']);
+  });
+
+  it('keeps one layout in flight and asks once more for the latest view when it is answered', () => {
+    const { client, worker, posted, canvas, layoutPosts, answer } = setup();
+    client.setView(view(100));
+    client.attach(canvas);
+    vi.advanceTimersByTime(100);
+    expect(layoutPosts()).toHaveLength(1);
+    for (const width of [110, 120, 130]) {
+      client.setView(view(width));
+      vi.advanceTimersByTime(100);
+    }
+    expect(layoutPosts()).toHaveLength(1);
+    const firstSequence = layoutPosts()[0].sequence;
+    posted.length = 0;
+    worker.onmessage!({ data: layoutReply(firstSequence) } as MessageEvent);
+    expect(types(posted)).toEqual(['layout']);
+    expect(posted[0].message.view.width).toBe(130);
+    expect(client.busy).toBe(true);
+    answer();
+    expect(client.busy).toBe(false);
+    vi.advanceTimersByTime(100);
+    expect(types(posted)).toEqual(['layout']);
   });
 
   it('posts removals and resets', () => {
@@ -131,39 +161,44 @@ describe('TreemapClient', () => {
     expect(client.layout).toBeNull();
   });
 
-  it('keeps a reply when only a tick has happened since the request', () => {
-    const { client, worker, posted, canvas, emit } = setup();
+  it('keeps a reply when only a tick has happened since the request, then lays out the new rows', () => {
+    const { client, worker, canvas, emit, layoutPosts } = setup();
     client.attach(canvas);
     client.setView(view());
     vi.advanceTimersByTime(100);
     emit().appended([row(2)]);
-    vi.advanceTimersByTime(1300); // a tick requests another layout for the same view
-    expect(types(posted).filter((type) => type === 'layout')).toHaveLength(2);
+    vi.advanceTimersByTime(1300); // a tick wants another layout for the same view, but one is in flight
+    expect(layoutPosts()).toHaveLength(1);
     worker.onmessage!({ data: layoutReply(1) } as MessageEvent);
     expect(client.layout).not.toBeNull();
+    expect(layoutPosts()).toHaveLength(2);
   });
 
   it('lays out the last rows of a search that started and finished between two ticks', () => {
-    const { client, session, posted, canvas, emit } = setup();
+    const { client, session, posted, canvas, emit, answer } = setup();
     session.running = false;
     client.setView(view());
     client.attach(canvas);
     vi.advanceTimersByTime(100);
+    answer();
     // The search starts and finishes before the first tick sees it running.
     emit().reset(1);
     vi.advanceTimersByTime(100);
+    answer();
     emit().appended([row(2), row(3)]);
     posted.length = 0;
     vi.advanceTimersByTime(1300);
-    expect(types(posted)).toEqual(['add', 'layout']);
+    expect(types(posted)).toEqual(['layout']);
   });
 
   it('lays out again after a row is removed once the search is over', () => {
-    const { client, session, posted, canvas, emit } = setup();
+    const { client, session, posted, canvas, emit, answer } = setup();
     session.running = false;
     client.setView(view());
     client.attach(canvas);
-    vi.advanceTimersByTime(2600);
+    vi.advanceTimersByTime(100);
+    answer();
+    vi.advanceTimersByTime(2500);
     posted.length = 0;
     emit().removed(1);
     vi.advanceTimersByTime(1300);
@@ -216,10 +251,10 @@ describe('TreemapClient', () => {
     client.setView(view());
     client.attach(canvas);
     vi.advanceTimersByTime(100);
-    emit().appended([row(2)]);
+    emit().removed(1);
     posted.length = 0;
     client.detach();
-    expect(types(posted)).toEqual(['add']);
+    expect(types(posted)).toEqual(['remove']);
     posted.length = 0;
     emit().appended([row(3)]);
     emit().removed(0);
