@@ -3,7 +3,7 @@
 // measured numbers.
 //
 // node ux7.mjs [--shots <folder>]
-//   Checks 1 to 16, 18 and 19 in headless Edge against the dev server (start it first: npm run dev). Needs no
+//   Checks 1 to 16 and 18 to 20 in headless Edge against the dev server (start it first: npm run dev). Needs no
 //   Spelunker window, takes no focus, and sends nothing to the desktop. With --shots, light and
 //   dark screenshots of the map on the deep fixture are saved into that folder.
 // node ux7.mjs --real
@@ -108,6 +108,13 @@ const MAP_HELPERS = `
         summary: map?.querySelector('.summary')?.textContent ?? null,
         legend: [...(map?.querySelectorAll('.legend .entry') ?? [])].map((entry) => entry.childNodes[1]?.textContent.trim() ?? ''),
         crumbs: [...(map?.querySelectorAll('.crumb') ?? [])].map((crumb) => crumb.textContent),
+        zoomButton: (() => {
+          const button = map?.querySelector('[data-zoom-button]');
+          if (!button) return null;
+          const box = button.getBoundingClientRect();
+          // With no aria-label, the button's text is its accessible name.
+          return { label: button.textContent.trim(), named: !button.hasAttribute('aria-label') && !button.hasAttribute('aria-labelledby'), title: button.title, disabled: button.disabled, focused: document.activeElement === button, x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        })(),
         tooltip: map?.querySelector('.tooltip strong')?.textContent ?? null,
         toggle: toggle ? {
           pressed: toggle.getAttribute('aria-pressed'),
@@ -353,6 +360,7 @@ async function browserChecks() {
   await waitForSettledMap();
   const crumbsBack = (await state()).crumbs;
   check('8. Backspace removes it', crumbsBack.length === crumbsAtTop.length, { crumbsAtTop, crumbsBack });
+  await zoomButtonChecks(block);
   await click(block.x, block.y, 2);
   await waitForSettledMap();
 
@@ -532,6 +540,11 @@ async function browserChecks() {
   // ---- 19. cushion and flat shading, on the deep fixture, whose large files make large tiles
   await shadingChecks();
 
+  // ---- 20. on the deep fixture, zoomed in by more than one level, each Zoom out click climbs one
+  const deepZoom = await state();
+  check('20. the deep fixture is zoomed in at least two levels with nothing selected', deepZoom.crumbs.length >= 3 && deepZoom.selectedName === null, { crumbs: deepZoom.crumbs, selected: deepZoom.selectedName });
+  await climbWithZoomButton(1);
+
   // ---- 16. the paint budget at ratio 2, last, since it resizes the window and resets the map height
   await ratioTwoPaintChecks();
 }
@@ -635,6 +648,41 @@ async function shadingChecks() {
   await chooseShading('Cushion');
   const backLight = await ev('window.__ux7.tileLight()');
   check('19. choosing Cushion again lights the tiles again', backLight?.height >= LARGE_TILE && backLight.topLeft > backLight.bottomRight * 1.1, backLight);
+}
+
+/**
+ * Check 20: the toolbar's zoom button is Zoom to folder at the top level and Zoom out once zoomed
+ * in, where one click goes up one folder. Starts and ends at the top level with nothing selected.
+ */
+async function zoomButtonChecks(block) {
+  const atTop = await state();
+  check('20. at the top level the zoom button is Zoom to folder, disabled with nothing selected', atTop.zoomButton?.label === 'Zoom to folder' && atTop.zoomButton.named && atTop.zoomButton.disabled && atTop.zoomButton.title === "Zoom to the selected file's folder (Z)", atTop.zoomButton);
+
+  await click(block.x, block.y, 2);
+  await waitForSettledMap();
+  const zoomed = await state();
+  check('20. after a Ctrl+click zoom it reads Zoom out, enabled, with Backspace in its title', zoomed.crumbs.length === atTop.crumbs.length + 1 && zoomed.zoomButton?.label === 'Zoom out' && zoomed.zoomButton.named && !zoomed.zoomButton.disabled && zoomed.zoomButton.title === 'Zoom out (Backspace)', { crumbs: zoomed.crumbs, button: zoomed.zoomButton });
+  await climbWithZoomButton(atTop.crumbs.length);
+}
+
+/**
+ * Clicks Zoom out until the map is back at the top level (`topLength` breadcrumb segments), checking
+ * each click goes up exactly one level. Expects nothing selected, so the button ends disabled.
+ */
+async function climbWithZoomButton(topLength) {
+  for (let before = await state(); before.crumbs.length > topLength; ) {
+    await click(before.zoomButton.x, before.zoomButton.y);
+    await waitForSettledMap();
+    const after = await state();
+    check(`20. one click on Zoom out goes up one level (${before.crumbs.length} to ${before.crumbs.length - 1} breadcrumb segments)`, after.crumbs.length === before.crumbs.length - 1, { before: before.crumbs, after: after.crumbs });
+    if (after.crumbs.length === topLength) {
+      check('20. back at the top level it reads Zoom to folder again, and the focus moved to the map', after.zoomButton?.label === 'Zoom to folder' && after.zoomButton.disabled && after.onStage, { button: after.zoomButton, onStage: after.onStage });
+    } else {
+      check('20. still zoomed in, it stays Zoom out and keeps the focus', after.zoomButton?.label === 'Zoom out' && !after.zoomButton.disabled && after.zoomButton.focused, after.zoomButton);
+    }
+    if (after.crumbs.length >= before.crumbs.length) return;
+    before = after;
+  }
 }
 
 /** The height in CSS pixels a file tile needs for its two patches to sit well apart and clear of its label. */
@@ -818,7 +866,7 @@ try {
   page = await openPage(real ? { onEvent } : { webSocketDebuggerUrl: edge.webSocketDebuggerUrl, onEvent });
   ({ send, ev, key, mouse, setField } = page);
   if (real) {
-    for (const number of [...Array.from({ length: 16 }, (_, index) => index + 1), 18, 19]) skip(`${number}.`, 'runs in headless Edge: node ux7.mjs');
+    for (const number of [...Array.from({ length: 16 }, (_, index) => index + 1), 18, 19, 20]) skip(`${number}.`, 'runs in headless Edge: node ux7.mjs');
     await realChecks();
   } else {
     await browserChecks();

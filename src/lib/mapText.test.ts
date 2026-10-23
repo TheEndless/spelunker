@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
 import { AGE_BUCKET_COUNT, CATEGORY_COUNT, RectKind } from './treemapLayout';
-import { effectiveFilter, fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText } from './mapText';
+import { effectiveFilter, fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText, zoomButton } from './mapText';
 import type { DisplayRow } from './types';
 
 const colors: MapColors = {
@@ -149,5 +149,23 @@ describe('tooltips', () => {
       lines: ['C:\\logs\\old'],
     });
     expect(groupTooltip(RectKind.FolderBlock, 1, 2, 'matches', '')).toEqual({ title: '1 file, 2 matches', lines: [] });
+  });
+});
+
+describe('zoomButton', () => {
+  const zoomToFolder = { label: 'Zoom to folder', title: "Zoom to the selected file's folder (Z)" };
+  const zoomOut = { label: 'Zoom out', title: 'Zoom out (Backspace)', disabled: false };
+
+  it('zooms to the folder at the top level, once a file is selected', () => {
+    expect(zoomButton(false, true)).toEqual({ ...zoomToFolder, disabled: false });
+  });
+
+  it('is disabled at the top level with nothing selected', () => {
+    expect(zoomButton(false, false)).toEqual({ ...zoomToFolder, disabled: true });
+  });
+
+  it('zooms out when zoomed in, whether or not a file is selected', () => {
+    expect(zoomButton(true, true)).toEqual(zoomOut);
+    expect(zoomButton(true, false)).toEqual(zoomOut);
   });
 });

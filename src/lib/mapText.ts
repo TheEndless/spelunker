@@ -2,6 +2,7 @@ import { formatSize, modifiedLabel } from './format';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
 import { RectKind, type Layout, type Metric } from './treemapLayout';
 import type { ColorMode } from './treemapPaint';
+import { withShortcut } from './shortcuts';
 import { count as counted } from './statusSummary';
 import type { DisplayRow } from './types';
 
@@ -70,6 +71,21 @@ export function effectiveFilter(chosen: ReadonlySet<number>, present: readonly {
   const result = new Set<number>();
   for (const bucket of chosen) if (present.some((entry) => entry.bucket === bucket)) result.add(bucket);
   return result;
+}
+
+export interface ZoomButtonText {
+  label: string;
+  title: string;
+  disabled: boolean;
+}
+
+/**
+ * The toolbar's zoom button. At the top level it zooms to the selected file's folder, so it waits
+ * for a selection. Zoomed in, the same button goes up one folder, which needs no selection.
+ */
+export function zoomButton(zoomed: boolean, hasSelection: boolean): ZoomButtonText {
+  if (zoomed) return { label: 'Zoom out', title: withShortcut('Zoom out', 'Backspace'), disabled: false };
+  return { label: 'Zoom to folder', title: withShortcut("Zoom to the selected file's folder", 'Z'), disabled: !hasSelection };
 }
 
 export interface TooltipText {

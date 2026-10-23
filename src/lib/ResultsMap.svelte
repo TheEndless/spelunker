@@ -18,7 +18,7 @@
   import { bestTextOn } from './colors';
   import { formatSize } from './format';
   import Icon from './Icon.svelte';
-  import { effectiveFilter, fileTooltip, groupTooltip, legendEntries, summaryText, type TooltipText } from './mapText';
+  import { effectiveFilter, fileTooltip, groupTooltip, legendEntries, summaryText, zoomButton, type TooltipText } from './mapText';
   import { tokensFor, type Mode } from './palettes';
   import { findRowIndex } from './rowLookup';
   import type { SearchSession } from './search.svelte';
@@ -494,6 +494,20 @@
     if (crumbs.length >= 2) client.zoomTo(crumbs[crumbs.length - 2].folderId);
   }
 
+  const zoomed = $derived(client.crumbs.length > 1);
+  const zoomControl = $derived(zoomButton(zoomed, selectedRect >= 0));
+
+  function onZoomButton() {
+    if (!zoomed) {
+      zoomInto(selectedRect);
+      return;
+    }
+    // Back at the top with nothing selected, the button turns into a disabled Zoom to folder and
+    // would drop the keyboard focus, so the focus moves to the map, where Z and Backspace work.
+    if (client.crumbs.length === 2 && selectedRect < 0) stage.focus();
+    zoomOut();
+  }
+
   function onStageClick(event: MouseEvent) {
     const rect = rectAt(event);
     if (rect < 0) return;
@@ -705,9 +719,10 @@
     <button
       type="button"
       class="tool"
-      disabled={selectedRect < 0}
-      title={withShortcut('Zoom to the selected file\'s folder', 'Z')}
-      onclick={() => zoomInto(selectedRect)}>Zoom to folder</button
+      data-zoom-button
+      disabled={zoomControl.disabled}
+      title={zoomControl.title}
+      onclick={onZoomButton}>{zoomControl.label}</button
     >
     <button
       type="button"
