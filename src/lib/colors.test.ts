@@ -1,5 +1,37 @@
 import { describe, expect, it } from 'vitest';
-import { bestTextOn, contrast, ensureContrast, mix, normalizeHex } from './colors';
+import { bestTextOn, contrast, ensureContrast, fromOklab, mix, normalizeHex, oklab, perceptualDistance } from './colors';
+
+describe('oklab', () => {
+  it('puts white at lightness 1 and black at 0, with no color', () => {
+    const [whiteL, whiteA, whiteB] = oklab('#FFFFFF');
+    expect(whiteL).toBeCloseTo(1, 3);
+    expect(Math.abs(whiteA) + Math.abs(whiteB)).toBeLessThan(0.001);
+    expect(oklab('#000000')[0]).toBeCloseTo(0, 6);
+  });
+
+  it('matches the published value for pure red', () => {
+    const [lightness, greenRed, blueYellow] = oklab('#FF0000');
+    expect(lightness).toBeCloseTo(0.628, 3);
+    expect(greenRed).toBeCloseTo(0.2249, 3);
+    expect(blueYellow).toBeCloseTo(0.1258, 3);
+  });
+
+  it('round-trips through fromOklab', () => {
+    for (const color of ['#A85A00', '#0F766E', '#5E81AC', '#ECEFF4', '#191D23']) expect(fromOklab(oklab(color))).toBe(color);
+  });
+
+  it('clamps colors outside the screen gamut', () => {
+    expect(fromOklab([1.2, 0, 0])).toBe('#FFFFFF');
+  });
+});
+
+describe('perceptualDistance', () => {
+  it('is 0 for the same color, 1 for black and white, and symmetric', () => {
+    expect(perceptualDistance('#336699', '#336699')).toBe(0);
+    expect(perceptualDistance('#000000', '#FFFFFF')).toBeCloseTo(1, 3);
+    expect(perceptualDistance('#A85A00', '#5A6573')).toBeCloseTo(perceptualDistance('#5A6573', '#A85A00'), 9);
+  });
+});
 
 describe('normalizeHex', () => {
   it('upper-cases and expands short hex', () => {

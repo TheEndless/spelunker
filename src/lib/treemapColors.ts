@@ -1,4 +1,4 @@
-import { ensureContrast, mix, normalizeHex } from './colors';
+import { contrast, ensureContrast, fromOklab, normalizeHex, oklab } from './colors';
 import type { Mode, Tokens } from './palettes';
 
 /** Hue in degrees for each category, in FILE_CATEGORIES order. "Other" is a neutral. */
@@ -47,9 +47,54 @@ export function mapColors(tokens: Tokens, mode: Mode): MapColors {
       3,
     ),
   );
-  const age = [0, 1, 2, 3, 4].map((step) => ensureContrast(mix(tokens.accent, tokens['text-muted'], step / 4), [background], 3));
-  age.push(ensureContrast(tokens['border-strong'], [background], 3));
-  return { background, category, age, outlineLight: '#FFFFFF', outlineDark: '#000000' };
+  return { background, category, age: ageRamp(tokens.accent, background, mode), outlineLight: '#FFFFFF', outlineDark: '#000000' };
+}
+
+/** OKLab lightness of the Today color: deep on a light map, bright on a dark one, so it stands out most. */
+const RECENT_LIGHTNESS: Record<Mode, number> = { light: 0.33, dark: 0.92 };
+const RECENT_CHROMA_MIN = 0.1;
+const RECENT_CHROMA_MAX = 0.16;
+/** The Older color keeps a trace of the accent's hue. */
+const OLD_CHROMA = 0.03;
+const FILL_CONTRAST = 3;
+/** A little above the minimum, so the faintest step does not need nudging back over it. */
+const OLD_CONTRAST_TARGET = 3.1;
+const LIGHTNESS_STEP = 0.005;
+const DATED_BUCKETS = 5;
+
+/**
+ * Today to Older, then Unknown. A single-hue ramp in OKLab (where equal steps look equal): Today is
+ * the accent's hue at its strongest and farthest from the background, and each older bucket moves
+ * evenly toward the background and toward gray, ending at Older, the faintest fill that still keeps
+ * 3:1. Mixing the accent with the muted text color instead gave steps too close to tell apart in
+ * palettes where the two are about as light. Unknown is a plain gray halfway along.
+ */
+function ageRamp(accent: string, background: string, mode: Mode): string[] {
+  const [, accentGreenRed, accentBlueYellow] = oklab(accent);
+  const hue = Math.atan2(accentBlueYellow, accentGreenRed);
+  const recentChroma = Math.min(RECENT_CHROMA_MAX, Math.max(RECENT_CHROMA_MIN, Math.hypot(accentGreenRed, accentBlueYellow)));
+  const colorAt = (lightness: number, chroma: number) => fromOklab([lightness, chroma * Math.cos(hue), chroma * Math.sin(hue)]);
+
+  const recentLightness = RECENT_LIGHTNESS[mode];
+  // Toward the background: lighter on a light map, darker on a dark one.
+  const towardBackground = mode === 'dark' ? -LIGHTNESS_STEP : LIGHTNESS_STEP;
+  let oldLightness = recentLightness;
+  while (
+    oldLightness > 0 &&
+    oldLightness < 1 &&
+    contrast(colorAt(oldLightness + towardBackground, OLD_CHROMA), background) >= OLD_CONTRAST_TARGET
+  ) {
+    oldLightness += towardBackground;
+  }
+
+  const ramp = Array.from({ length: DATED_BUCKETS }, (_, bucket) => {
+    const progress = bucket / (DATED_BUCKETS - 1);
+    const lightness = recentLightness + (oldLightness - recentLightness) * progress;
+    const chroma = recentChroma + (OLD_CHROMA - recentChroma) * progress;
+    return ensureContrast(colorAt(lightness, chroma), [background], FILL_CONTRAST);
+  });
+  const unknown = ensureContrast(colorAt((recentLightness + oldLightness) / 2, 0), [background], FILL_CONTRAST);
+  return [...ramp, unknown];
 }
 
 export interface ForcedColors {
