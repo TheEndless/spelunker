@@ -13,6 +13,12 @@ const TYPES: [string, string][] = [
   ['js', 'JavaScript File'],
 ];
 
+/**
+ * One formatter for every row. `toLocaleString` builds a new one per call, which made each batch of
+ * 2,500 fake rows a long task on its own and muddied the map's timing checks.
+ */
+const DATE_FORMAT = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
+
 function fakeRow(index: number, withHits: boolean): ResultRow {
   const [extension, typeName] = TYPES[index % TYPES.length];
   const modifiedMs = Date.now() - ((index * 104729) % (400 * 86_400_000));
@@ -20,8 +26,61 @@ function fakeRow(index: number, withHits: boolean): ResultRow {
     path: `C:\\projects\\demo\\module_${index % 97}\\file_${index}.${extension}`,
     size: (index * 7919) % 5_000_000,
     modifiedMs,
-    modifiedText: new Date(modifiedMs).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' }),
+    modifiedText: DATE_FORMAT.format(modifiedMs),
     hits: withHits ? 1 + (index % 6) : 0,
+    typeName,
+  };
+}
+
+/** The deep fixture's file types, with images and archives so the map shows more than code and text. */
+const DEEP_TYPES: [string, string][] = [
+  ['rs', 'Rust Source File'],
+  ['ts', 'TypeScript Source File'],
+  ['md', 'Markdown Source Document'],
+  ['log', 'Text Document'],
+  ['png', 'PNG File'],
+  ['zip', 'Compressed (zipped) Folder'],
+  ['json', 'JSON Source File'],
+];
+
+/** A deterministic path in a deep, uneven tree: the number of levels and the fan-out vary by index. */
+export function deepPath(index: number): string {
+  const levels = 3 + (index % 7);
+  const parts = ['C:', 'data'];
+  let seed = index * 2654435761;
+  for (let level = 0; level < levels; level++) {
+    seed = (seed ^ (seed >>> 13)) * 1274126177;
+    const fanOut = 3 + ((level * 5 + (index % 11)) % 9);
+    parts.push(`d${level}_${Math.abs(seed >> 3) % fanOut}`);
+  }
+  return `${parts.join('\\')}\\file_${index}.${DEEP_TYPES[index % DEEP_TYPES.length][0]}`;
+}
+
+const DAY_MS = 86_400_000;
+/** The oldest file in the deep tree, so the Older age bucket is well filled. */
+const DEEP_OLDEST_DAYS = 3 * 365;
+
+/** A well-mixed number in 0..1 for an index, so dates do not line up with folders or types. */
+function unitHash(index: number): number {
+  let value = Math.imul(index ^ 0x9e3779b9, 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 13), 0xc2b2ae35);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * One row of the deep fixture. Sizes are heavy tailed (a few files are hundreds of times larger than
+ * most), match counts vary, and dates run from minutes to three years old, with a few unknown.
+ */
+export function deepRow(index: number): ResultRow {
+  const typeName = DEEP_TYPES[index % DEEP_TYPES.length][1];
+  // Cubing the hash crowds most dates near today while still reaching three years back.
+  const modifiedMs = index % 53 === 0 ? null : Date.now() - Math.floor(unitHash(index) ** 3 * DEEP_OLDEST_DAYS * DAY_MS);
+  return {
+    path: deepPath(index),
+    size: Math.floor(1000 * Math.pow(1.0003, index % 40000)) + ((index * 7919) % 5_000_000),
+    modifiedMs,
+    modifiedText: modifiedMs === null ? '' : DATE_FORMAT.format(modifiedMs),
+    hits: 1 + ((index * 31) % 17 === 0 ? index % 200 : index % 6),
     typeName,
   };
 }
@@ -32,11 +91,15 @@ const SKIPPED_FILES: ErrorRow[] = Array.from({ length: 46 }, (_, index) => ({
   message: 'Access is denied. (os error 5)',
 }));
 
-/** Typing "many" in the text box streams 100,000 rows so scrolling can be judged by eye. */
+/**
+ * Typing "many" in the text box streams 100,000 rows so scrolling can be judged by eye. "deep"
+ * streams 100,000 rows in a deep, uneven folder tree, the fair test for the results map.
+ */
 export function startSearch(request: SearchRequest, onMessage: (message: SearchMessage) => void) {
   cancelled = false;
-  const total = ['many', 'slow'].includes(request.query.text) ? 100_000 : 400;
+  const total = ['many', 'slow', 'deep'].includes(request.query.text) ? 100_000 : 400;
   const withHits = request.query.text !== '';
+  const makeRow = request.query.text === 'deep' ? deepRow : (index: number) => fakeRow(index, withHits);
   const batchSize = Math.max(50, Math.floor(total / 40));
   let produced = 0;
   const started = performance.now();
@@ -70,7 +133,7 @@ export function startSearch(request: SearchRequest, onMessage: (message: SearchM
     }
     const rows: ResultRow[] = [];
     for (let count = 0; count < batchSize && produced < total; count++) {
-      rows.push(fakeRow(produced++, withHits));
+      rows.push(makeRow(produced++));
     }
     // The skipped files arrive with the first batch, like the first locked folders a real walk meets.
     const errors = produced === rows.length ? SKIPPED_FILES : [];
