@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrast, perceptualDistance } from './colors';
+import { contrast, oklab, perceptualDistance } from './colors';
 import { FILE_CATEGORIES } from './fileKinds';
 import { PALETTES, type Mode } from './palettes';
 import { shadeChannel, loneRidgeMeanBrightness } from './treemapCushion';
@@ -28,6 +28,28 @@ describe('mapColors', () => {
           expect(colors.category).toHaveLength(FILE_CATEGORIES.length);
           expect(colors.age).toHaveLength(AGE_BUCKET_COUNT);
           for (const color of [...colors.category, ...colors.age, colors.background]) expect(color).toMatch(HEX);
+        });
+
+        it('keeps every base fill at least 3:1 against the map background (Flat mode and the legend paint it as is)', () => {
+          for (const color of [...colors.category, ...colors.age]) {
+            expect(contrast(color, colors.background)).toBeGreaterThanOrEqual(3);
+          }
+        });
+
+        it('runs the dated ages monotonically in OKLab lightness', () => {
+          const lightness = colors.age.slice(0, LAST_DATED_BUCKET + 1).map((color) => oklab(color)[0]);
+          for (let bucket = 0; bucket < LAST_DATED_BUCKET; bucket++) {
+            if (mode === 'dark') expect(lightness[bucket + 1]).toBeLessThan(lightness[bucket]);
+            else expect(lightness[bucket + 1]).toBeGreaterThan(lightness[bucket]);
+          }
+        });
+
+        it('lets a label reach 4.5:1 on every age fill at the shaded mean', () => {
+          const typical = loneRidgeMeanBrightness();
+          colors.age.forEach((base, bucket) => {
+            const reached = contrast(labelColorOn(base, typical, typical), shadedMean(base));
+            expect(reached, `age ${bucket} ${base}`).toBeGreaterThanOrEqual(4.5 - 1e-9);
+          });
         });
 
         it('keeps the shaded mean of every fill at least 3:1 against the map background', () => {

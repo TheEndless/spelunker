@@ -1,4 +1,4 @@
-import { contrast, fromOklab, mix, normalizeHex, oklab } from './colors';
+import { contrast, fromOklab, mix, normalizeHex, oklab, perceptualDistance } from './colors';
 import type { Mode, Tokens } from './palettes';
 import { loneRidgeMeanBrightness, shadeChannel } from './treemapCushion';
 
@@ -79,39 +79,57 @@ const SEARCH_STEPS = 100;
 const CATEGORY_LIGHTNESS_STEP = 0.005;
 
 /**
- * The first candidate (step 0 is the starting color, each step goes further toward the background's
- * opposite) whose shaded mean reaches 3:1 against `background`, and, for fills that carry a label,
- * the label contrast too. Shading darkens tiles, so a dark map needs brighter bases than the bare
- * rule would. If no step passes it returns the last candidate.
+ * Whether a fill is acceptable. Its base color (Flat mode and the legend paint it as is) keeps 3:1
+ * against the map background, and so does its shaded mean (what cushion mode shows on average).
+ * On a light map the base rule binds, on a dark map the shaded rule does. A fill that carries a
+ * label must also let a label reach the text contrast.
  */
-function firstShadedPassing(candidateAt: (step: number) => string, background: string, carriesLabel: boolean): string {
-  let candidate = normalizeHex(candidateAt(0));
-  for (let step = 0; step <= SEARCH_STEPS; step++) {
-    candidate = normalizeHex(candidateAt(step));
-    if (contrast(shadedMean(candidate), background) >= FILL_CONTRAST && (!carriesLabel || labelReadsOnMean(candidate))) break;
-  }
-  return candidate;
+function fillPasses(base: string, background: string, carriesLabel: boolean, minimumContrast = FILL_CONTRAST): boolean {
+  return (
+    contrast(base, background) >= minimumContrast &&
+    contrast(shadedMean(base), background) >= minimumContrast &&
+    (!carriesLabel || labelReadsOnMean(base))
+  );
 }
 
-/** Moves `base` toward white (dark map) or black (light map) until it passes, which loses some saturation. */
-function ensureShadedContrast(base: string, background: string, mode: Mode, carriesLabel: boolean): string {
+/**
+ * The first candidate whose fill passes (step 0 is the starting color, each step goes further toward
+ * a more visible color), or undefined when none of the steps does.
+ */
+function firstPassingFill(
+  candidateAt: (step: number) => string,
+  background: string,
+  carriesLabel: boolean,
+  minimumContrast = FILL_CONTRAST,
+): string | undefined {
+  for (let step = 0; step <= SEARCH_STEPS; step++) {
+    const candidate = normalizeHex(candidateAt(step));
+    if (fillPasses(candidate, background, carriesLabel, minimumContrast)) return candidate;
+  }
+  return undefined;
+}
+
+/** Moves `base` toward white (dark map) or black (light map) until its fill passes, which loses some saturation. */
+function ensureFill(base: string, background: string, mode: Mode, carriesLabel: boolean): string | undefined {
   const target = mode === 'dark' ? '#FFFFFF' : '#000000';
-  return firstShadedPassing((step) => mix(base, target, step / SEARCH_STEPS), background, carriesLabel);
+  return firstPassingFill((step) => mix(base, target, step / SEARCH_STEPS), background, carriesLabel);
 }
 
 export function mapColors(tokens: Tokens, mode: Mode): MapColors {
   const background = normalizeHex(tokens.surface);
   const baseLightness = mode === 'dark' ? 0.6 : 0.42;
-  const lighter = mode === 'dark' ? 1 : -1;
+  const searchDirection = mode === 'dark' ? 1 : -1;
   const category = CATEGORY_HUES.map((hue, index) => {
     const saturation = index === OTHER_INDEX ? 0.08 : CATEGORY_SATURATION;
     const startLightness = baseLightness + CATEGORY_LIGHTNESS_SHIFT[index];
     // Raising HSL lightness keeps more of the hue's saturation than mixing toward white would.
-    return firstShadedPassing(
-      (step) => hslToHex(hue, saturation, Math.min(1, Math.max(0, startLightness + lighter * step * CATEGORY_LIGHTNESS_STEP))),
+    const fill = firstPassingFill(
+      (step) => hslToHex(hue, saturation, Math.min(1, Math.max(0, startLightness + searchDirection * step * CATEGORY_LIGHTNESS_STEP))),
       background,
       true,
     );
+    if (fill === undefined) throw new Error(`No ${mode} fill for category ${CATEGORY_LABELS[index]} on ${background} reaches the contrast rules`);
+    return fill;
   });
   return { background, category, age: ageRamp(tokens.accent, background, mode), outlineLight: '#FFFFFF', outlineDark: '#000000' };
 }
@@ -120,14 +138,24 @@ export function mapColors(tokens: Tokens, mode: Mode): MapColors {
 const RECENT_LIGHTNESS: Record<Mode, number> = { light: 0.33, dark: 0.96 };
 const RECENT_CHROMA_MIN = 0.1;
 const RECENT_CHROMA_MAX = 0.16;
-/** The Older color keeps a trace of the accent's hue on a light map. */
-const OLD_CHROMA: Record<Mode, number> = { light: 0.03, dark: 0.1 };
+/** The Older color keeps only a trace of the accent's hue, so it stays muted. */
+const OLD_CHROMA = 0.03;
+/** The smallest OKLab distance between neighbouring age colors (see the age step test). */
+const MIN_AGE_STEP = 0.06;
 /**
- * How far the ramp's hue turns from Today to Older. Shading forces dark-map fills to be light, which
- * leaves little lightness room for four clear steps (Nord's dark map has the least), so the dark ramp
- * also travels around the hue circle. A light map has room and stays one hue.
+ * Where the plain single-hue ramp cannot give four clear steps (the dark map of Nord has only
+ * about 0.17 of lightness room once its shaded mean must keep 3:1), the ramp is allowed to turn its
+ * hue from Today to Older, by the smallest of these spans that works, trying each span in both
+ * directions, and then to keep a little more chroma at Older, smallest first.
+ * RAMP_HUE_SPAN_STEP_DEGREES and RAMP_HUE_SPAN_MAX_DEGREES bound that search.
+ * Measured palettes that needed it (every other palette and mode keeps the single-hue ramp):
+ * Nord dark turns the hue 95 degrees (-95) and keeps Older chroma 0.10, and One dark turns 5 degrees
+ * (+5) with Older chroma 0.07. Nord dark could not be made valid with Older chroma at or under 0.05
+ * at any span up to 180 degrees, so its Older is more vivid than the others.
  */
-const RAMP_HUE_SPAN_DEGREES: Record<Mode, number> = { light: 0, dark: -130 };
+const RAMP_HUE_SPAN_STEP_DEGREES = 5;
+const RAMP_HUE_SPAN_MAX_DEGREES = 180;
+const OLD_CHROMA_OPTIONS = [OLD_CHROMA, 0.05, 0.07, 0.1];
 /** A little above the minimum, so the faintest step does not need nudging back over it. */
 const OLD_CONTRAST_TARGET = 3.1;
 const LIGHTNESS_STEP = 0.005;
@@ -141,12 +169,42 @@ const DATED_BUCKETS = 5;
  * evenly toward the background, ending at Older, the faintest fill whose SHADED mean still keeps
  * 3:1. Mixing the accent with the muted text color instead gave steps too close to tell apart in
  * palettes where the two are about as light. Unknown is a plain gray halfway along.
+ *
+ * Every fill keeps 3:1 on its base and on its shaded mean and lets a label reach 4.5:1 (age colors
+ * carry labels too). If the single-hue ramp misses a step, monotonic lightness or a label, the
+ * ramp's hue is turned as little as needed (see RAMP_HUE_SPAN_STEP_DEGREES for which palettes do).
+ * Ramps that cannot be made valid fall back to the single-hue ramp and the age tests report them.
  */
 function ageRamp(accent: string, background: string, mode: Mode): string[] {
+  const plain = rampFor(accent, background, mode, 0, OLD_CHROMA);
+  if (rampIsValid(plain, background, mode)) return plain;
+  for (let degrees = RAMP_HUE_SPAN_STEP_DEGREES; degrees <= RAMP_HUE_SPAN_MAX_DEGREES; degrees += RAMP_HUE_SPAN_STEP_DEGREES) {
+    for (const oldChroma of OLD_CHROMA_OPTIONS) {
+      for (const direction of [-1, 1]) {
+        const turned = rampFor(accent, background, mode, direction * degrees, oldChroma);
+        if (rampIsValid(turned, background, mode)) return turned;
+      }
+    }
+  }
+  return plain;
+}
+
+/** Neighbouring dated colors at least MIN_AGE_STEP apart, strictly monotonic in lightness, Unknown apart from all, labels readable. */
+function rampIsValid(ramp: string[], background: string, mode: Mode): boolean {
+  const dated = ramp.slice(0, DATED_BUCKETS);
+  const unknown = ramp[DATED_BUCKETS];
+  const lightness = dated.map((color) => oklab(color)[0]);
+  const monotonic = lightness.every((value, bucket) => bucket === 0 || (mode === 'dark' ? value < lightness[bucket - 1] : value > lightness[bucket - 1]));
+  const stepsClear = dated.every((color, bucket) => bucket === 0 || perceptualDistance(color, dated[bucket - 1]) >= MIN_AGE_STEP);
+  const unknownApart = dated.every((color) => perceptualDistance(color, unknown) >= MIN_AGE_STEP);
+  return monotonic && stepsClear && unknownApart && ramp.every((color) => fillPasses(color, background, true));
+}
+
+function rampFor(accent: string, background: string, mode: Mode, hueSpanDegrees: number, oldChroma: number): string[] {
   const [, accentGreenRed, accentBlueYellow] = oklab(accent);
   const hue = Math.atan2(accentBlueYellow, accentGreenRed);
   const recentChroma = Math.min(RECENT_CHROMA_MAX, Math.max(RECENT_CHROMA_MIN, Math.hypot(accentGreenRed, accentBlueYellow)));
-  const hueSpan = (RAMP_HUE_SPAN_DEGREES[mode] * Math.PI) / 180;
+  const hueSpan = (hueSpanDegrees * Math.PI) / 180;
   // A color the screen cannot show would be clamped and lose lightness, so it gives up chroma instead.
   const colorAt = (lightness: number, chroma: number, progress = 0) => {
     const rotated = hue + hueSpan * progress;
@@ -166,18 +224,21 @@ function ageRamp(accent: string, background: string, mode: Mode): string[] {
   while (
     oldLightness > 0 &&
     oldLightness < 1 &&
-    contrast(shadedMean(colorAt(oldLightness + towardBackground, OLD_CHROMA[mode], 1)), background) >= OLD_CONTRAST_TARGET
+    fillPasses(colorAt(oldLightness + towardBackground, oldChroma, 1), background, false, OLD_CONTRAST_TARGET)
   ) {
     oldLightness += towardBackground;
   }
 
+  // A fill that misses a rule is moved toward white or black. Falling back to the unmoved color
+  // keeps the ramp complete, and rampIsValid then rejects it.
+  const adjusted = (color: string) => ensureFill(color, background, mode, true) ?? color;
   const ramp = Array.from({ length: DATED_BUCKETS }, (_, bucket) => {
     const progress = bucket / (DATED_BUCKETS - 1);
     const lightness = recentLightness + (oldLightness - recentLightness) * progress;
-    const chroma = recentChroma + (OLD_CHROMA[mode] - recentChroma) * progress;
-    return ensureShadedContrast(colorAt(lightness, chroma, progress), background, mode, false);
+    const chroma = recentChroma + (oldChroma - recentChroma) * progress;
+    return adjusted(colorAt(lightness, chroma, progress));
   });
-  const unknown = ensureShadedContrast(colorAt((recentLightness + oldLightness) / 2, 0), background, mode, false);
+  const unknown = adjusted(colorAt((recentLightness + oldLightness) / 2, 0));
   return [...ramp, unknown];
 }
 
