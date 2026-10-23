@@ -1,6 +1,7 @@
 // Real-window checks for searching every drive: the toggle in the app, a real all-drives search,
 // and the launch with "This PC" that Explorer's This PC menu entry makes.
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { PAGE_HELPERS } from './cdp.mjs';
 import { createChecker, openPage } from './page.mjs';
 
@@ -73,7 +74,12 @@ check('results come from more than one drive', drivesSeen.size >= 2, { drives: [
 // ---- Explorer's This PC entry starts the app with the words "This PC"
 await setField('[role=combobox]', 'D:\\Development');
 const exe = 'D:\\Development\\ai\\spelunker\\target\\debug\\spelunker-app.exe';
-execFileSync('pwsh', ['-NoProfile', '-Command', `Start-Process '${exe}' -ArgumentList '"This PC"'; Start-Sleep 3`], { encoding: 'utf8' });
+// A second launch hands its words to the running window and exits. It is started without
+// activation, and SPELUNKER_NO_FOCUS (set by launch.ps1 on the running window) keeps that window
+// from coming forward, so this takes no focus.
+const startQuiet = fileURLToPath(new URL('./start-quiet.ps1', import.meta.url));
+execFileSync('pwsh', ['-NoProfile', '-File', startQuiet, exe, '-Arguments', '"This PC"', '-Wait'], { encoding: 'utf8' });
+await sleep(3000);
 check('launching with "This PC" sets Look in to all drives', (await lookIn()) === 'This PC (all drives)', await lookIn());
 
 summarize();

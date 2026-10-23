@@ -7,14 +7,16 @@ $target = Join-Path $PSScriptRoot '.install-run'
 $profile = Join-Path $PSScriptRoot '.install-run-profile'
 foreach ($path in $target, $profile) { if (Test-Path $path) { Remove-Item -Recurse -Force $path } }
 
-Start-Process $setup -ArgumentList '/S', "/D=$target" -Wait | Out-Null
+$startQuiet = Join-Path $PSScriptRoot 'start-quiet.ps1'
+& $startQuiet $setup -Arguments "/S /D=$target" -Wait | Out-Null
 $exe = Join-Path $target 'Spelunker.exe'
 "installed: $(Test-Path $exe)"
 
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
 $env:WEBVIEW2_USER_DATA_FOLDER = $profile
 $folder = Join-Path $repo 'docs'
-$process = Start-Process $exe -ArgumentList ('"' + $folder + '."') -PassThru
+# Started without activation and moved off screen. The release exe ignores SPELUNKER_NO_FOCUS by design.
+$process = & $startQuiet $exe -Arguments ('"' + $folder + '."') -OffScreenWindowClass 'Tauri Window'
 Start-Sleep -Seconds 7
 try {
   $pages = (Invoke-WebRequest http://127.0.0.1:9222/json -UseBasicParsing).Content | ConvertFrom-Json
@@ -28,7 +30,7 @@ try {
 Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 $uninstall = Join-Path $target 'uninstall.exe'
-if (Test-Path $uninstall) { Start-Process $uninstall -ArgumentList '/S', "_?=$target" -Wait | Out-Null }
+if (Test-Path $uninstall) { & $startQuiet $uninstall -Arguments "/S _?=$target" -Wait | Out-Null }
 foreach ($path in $target, $profile) { if (Test-Path $path) { Remove-Item -Recurse -Force $path } }
 $vendor = 'HKCU:\Software\Spelunker'
 if (Test-Path $vendor) { Remove-Item $vendor -Recurse -Force -Confirm:$false }

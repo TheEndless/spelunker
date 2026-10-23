@@ -10,7 +10,8 @@ if (Test-Path $target) { Remove-Item -Recurse -Force $target }
 & "$PSScriptRoot\regshow.ps1"
 
 "== installing silently to $target"
-$install = Start-Process $setup -ArgumentList '/S', "/D=$target" -Wait -PassThru
+$startQuiet = Join-Path $PSScriptRoot 'start-quiet.ps1'
+$install = & $startQuiet $setup -Arguments "/S /D=$target" -Wait
 "installer exit code: $($install.ExitCode)"
 "files: " + ((Get-ChildItem $target | Select-Object -ExpandProperty Name) -join ', ')
 
@@ -21,7 +22,7 @@ $install = Start-Process $setup -ArgumentList '/S', "/D=$target" -Wait -PassThru
 
 "== uninstalling"
 $uninstall = Get-ChildItem $target -Filter 'uninstall*.exe' | Select-Object -First 1
-$run = Start-Process $uninstall.FullName -ArgumentList '/S', "_?=$target" -Wait -PassThru
+$run = & $startQuiet $uninstall.FullName -Arguments "/S _?=$target" -Wait
 "uninstaller exit code: $($run.ExitCode)"
 
 "== after uninstall"
