@@ -1,6 +1,7 @@
 # Installs the setup into a scratch folder, starts the INSTALLED app the way Explorer's folder entry
 # does (exe plus the folder with a trailing dot), reports what the window loaded and what is in
 # Look in, then stops it and uninstalls. Run with no other copy of Spelunker open and no dev server.
+& (Join-Path $PSScriptRoot 'assert-no-spelunker.ps1')
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $setup = (Get-ChildItem (Join-Path $repo 'target\release\bundle\nsis\Spelunker_*_x64-setup.exe') | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
 $target = Join-Path $PSScriptRoot '.install-run'

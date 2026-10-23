@@ -32,7 +32,7 @@ for when nobody is using the machine (see the warnings).
 | `node ux4.mjs` | 27 checks: preview splitter (drag, keys, limits, reset, persistence), collapse and restore, F6 with a hidden preview, columns refitting when the pane or window changes |
 | `node ux5.mjs` | 9 checks: the all-drives button, typing the words, a real search across drives, the launch with "This PC" (a second launch, started without activation) |
 | `node ux6.mjs` | 21 checks: every popover, menu and dialog stays inside the window at three window sizes |
-| `node ux7.mjs [--shots <folder>]` | 41 checks (the 16 numbered items of the results map suite, and no console errors): drawing, Size and Matches, type and age, click and list selection, hover, zoom, map keys, F6, `Ctrl+Shift+M` and the Map button, the map splitter, the shortest window, forced colors, both themes, and the performance budget with every number printed. Runs in headless Edge against the dev server, so it needs no Spelunker window. `--shots` saves screenshots of the deep fixture |
+| `node ux7.mjs [--shots <folder>]` | 50 checks (numbered items 1 to 16 and 18 of the results map suite, and no console errors): drawing, Size and Matches, type and age, click and list selection, hover, zoom, map keys, the context menu from a right-click, the Menu key and Shift+F10, F6, `Ctrl+Shift+M` and the Map button (also while the window is too short), the map splitter, the shortest window, forced colors, both themes, and the performance budget (layout, paint, hit index, hover, the cost of posting rows to the worker, long tasks) with every number printed. Runs in headless Edge against the dev server, so it needs no Spelunker window. `--shots` saves screenshots of the deep fixture |
 | `node ux7.mjs --real` | 4 checks (item 17, and no console errors): a real folder search through the actual backend draws the map with real file names. Attaches to the running debug exe |
 | `node fill.mjs` | 8 checks: the columns fill the pane as the window widens, narrows, and the preview hides, in automatic and hand-sized mode. Runs in headless Edge against the dev server, so it needs no Spelunker window |
 | `node previews.mjs <folder>` | Opens each file in a folder and saves a screenshot of the preview pane into `final/` |
@@ -52,6 +52,13 @@ for when nobody is using the machine (see the warnings).
   forward: not when the window first appears, not on a second launch (which normally restores and
   focuses the running window), and not when the window state plugin restores a saved window. A
   release build ignores the variable, so the product always behaves the same for its users.
+- **Close any open Spelunker first.** Only one copy runs at a time: the single-instance plugin
+  names a mutex after the app identifier (`dev.skean.spelunker-sim`), which debug and release
+  builds share. A copy started while another is open hands its launch to that window and exits,
+  and an open release window then restores and focuses itself. So `launch.ps1`,
+  `release-check.ps1` and `installrun.ps1` call `assert-no-spelunker.ps1` first, which stops them
+  with a message when that mutex exists. `ux5.mjs` makes such a second launch on purpose, which is
+  safe only because `launch.ps1` made sure the window receiving it is the debug one.
 - **`release-check.ps1` and `installrun.ps1` take the foreground: run them only when nobody is using
   the machine.** They start a release exe, and once a window state has been saved
   (`%APPDATA%\dev.skean.spelunker\.window-state.json`, written whenever the app is closed

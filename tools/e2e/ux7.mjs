@@ -2,7 +2,7 @@
 // short window, forced colors, themes, and the performance budget with measured numbers.
 //
 // node ux7.mjs [--shots <folder>]
-//   Checks 1 to 16 in headless Edge against the dev server (start it first: npm run dev). Needs no
+//   Checks 1 to 16 and 18 in headless Edge against the dev server (start it first: npm run dev). Needs no
 //   Spelunker window, takes no focus, and sends nothing to the desktop. With --shots, light and
 //   dark screenshots of the map on the deep fixture are saved into that folder.
 // node ux7.mjs --real
@@ -20,8 +20,8 @@ const shotsFolder = shotsIndex > 0 ? process.argv[shotsIndex + 1] : null;
 const APP_URL = 'http://localhost:5173/';
 const HEADLESS_PORT = 9371;
 
-// The performance budget from the design (docs/superpowers/specs/2026-10-22-results-map-design.md).
-const BUDGET = { layoutMs: 250, paintMs: 80, hoverMs: 1, indexMs: 5, longTaskMs: 100, extraLongTaskTotalMs: 50 };
+// The map's performance budget. postMs is the page's cost to hand one batch of rows to the worker.
+const BUDGET = { layoutMs: 250, paintMs: 80, hoverMs: 1, indexMs: 5, postMs: 2, longTaskMs: 100, extraLongTaskTotalMs: 50 };
 const AGE_LABELS = ['Today', 'This week', 'This month', 'This year', 'Older', 'Unknown'];
 
 const { check, summarize } = createChecker();
@@ -108,7 +108,13 @@ const MAP_HELPERS = `
         legend: [...(map?.querySelectorAll('.legend .entry') ?? [])].map((entry) => entry.childNodes[1]?.textContent.trim() ?? ''),
         crumbs: [...(map?.querySelectorAll('.crumb') ?? [])].map((crumb) => crumb.textContent),
         tooltip: map?.querySelector('.tooltip strong')?.textContent ?? null,
-        toggle: toggle ? { pressed: toggle.getAttribute('aria-pressed'), disabled: toggle.disabled, title: toggle.title } : null,
+        toggle: toggle ? {
+          pressed: toggle.getAttribute('aria-pressed'),
+          disabled: toggle.disabled,
+          ariaDisabled: toggle.getAttribute('aria-disabled'),
+          title: toggle.title,
+          description: (toggle.getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean).map((id) => document.getElementById(id)?.textContent.trim() ?? '').join(' '),
+        } : null,
         pane: document.activeElement?.closest('[data-pane]')?.getAttribute('data-pane') ?? null,
         onStage: document.activeElement?.hasAttribute('data-map-stage') ?? false,
         selectedName: selected?.querySelector('.cell .text')?.textContent ?? null,
@@ -133,6 +139,48 @@ const MAP_HELPERS = `
         .sort((left, right) => right.width * right.height - left.width * left.height)
         .slice(0, count)
         .map((rect) => ({ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, width: rect.width, height: rect.height }));
+    },
+    /** The app's own context menu, when open: its name, where it sits, and how many items it has. */
+    menu() {
+      const menu = document.querySelector('.menu[role=menu]');
+      if (!menu) return null;
+      const box = menu.getBoundingClientRect();
+      return { label: menu.getAttribute('aria-label'), left: box.left, top: box.top, items: menu.querySelectorAll('[role^=menuitem]').length, viewport: { width: innerWidth, height: innerHeight } };
+    },
+    /**
+     * Starts timing every message the page posts to a worker. postMessage copies the message before
+     * it returns, so its duration is the page's cost of handing the rows over. The wrapper goes on
+     * the prototype once per page, and each call starts a fresh record.
+     */
+    recordPosts() {
+      window.__ux7Posts = [];
+      if (Worker.prototype.postMessage.timedByUx7) return true;
+      const original = Worker.prototype.postMessage;
+      const timed = function (message, transfer) {
+        const started = performance.now();
+        try {
+          return original.call(this, message, transfer);
+        } finally {
+          window.__ux7Posts?.push({ type: message?.type, milliseconds: performance.now() - started, records: message?.records?.length ?? 0 });
+        }
+      };
+      timed.timedByUx7 = true;
+      Worker.prototype.postMessage = timed;
+      return true;
+    },
+    /** The recorded add posts: how many, the rows they carried, and their 95th percentile and slowest times. */
+    postStats() {
+      const adds = (window.__ux7Posts ?? []).filter((post) => post.type === 'add');
+      const times = adds.map((post) => post.milliseconds).sort((left, right) => left - right);
+      const round = (value) => Number(value.toFixed(3));
+      return {
+        adds: adds.length,
+        records: adds.reduce((sum, post) => sum + post.records, 0),
+        largestBatch: Math.max(0, ...adds.map((post) => post.records)),
+        p95: times.length ? round(times[Math.floor(times.length * 0.95)]) : 0,
+        max: times.length ? round(times.at(-1)) : 0,
+        layoutRequests: (window.__ux7Posts ?? []).filter((post) => post.type === 'layout').length,
+      };
     },
   };
   true`;
@@ -296,6 +344,9 @@ async function browserChecks() {
   check('9. an arrow key on the focused map changes the selected row', afterArrow !== null && afterArrow !== beforeArrow, { beforeArrow, afterArrow, crumbs: (await state()).crumbs });
   skip('9. Enter opens the selected file', 'the suite records no open_path requests, and outside Tauri opening a file does nothing to observe');
 
+  // ---- 18. the context menu. Outside Tauri there is no Windows menu, so the app's own menu opens.
+  await contextMenuChecks();
+
   // ---- 10. F6
   await ev(`document.querySelector('[data-pane="results"] [role=grid]').focus()`);
   await key('F6');
@@ -360,12 +411,20 @@ async function browserChecks() {
   await resizeTo(1000, 520);
   const short = await state();
   check('13. at 1000 by 520 the map collapses on its own', !short.shown, short);
-  check('13. the status bar button is disabled and says why', short.toggle?.disabled === true && short.toggle.title === 'The window is too short for the map', short.toggle);
+  const tooShortReason = 'The window is too short for the map';
+  check('13. the status bar button is marked unavailable, not pressed, and says why', short.toggle?.ariaDisabled === 'true' && short.toggle.pressed === 'false' && short.toggle.title === tooShortReason && short.toggle.description === tooShortReason, short.toggle);
+  await ev(`document.querySelector('.map-toggle').focus()`);
+  check('13. it stays focusable, so the reason can be reached from the keyboard', short.toggle?.disabled === false && (await ev(`document.activeElement === document.querySelector('.map-toggle')`)), short.toggle);
+  const storedBefore = await ev(`localStorage.getItem('spelunker.preferences.v1')`);
+  await ev(`document.querySelector('.map-toggle').click()`);
+  await settle(400);
+  const afterClick = await state();
+  check('13. clicking it while the window is too short changes nothing', !afterClick.shown && afterClick.toggle?.pressed === 'false' && (await ev(`localStorage.getItem('spelunker.preferences.v1')`)) === storedBefore, afterClick.toggle);
   check('13. the grid keeps at least 200 px', short.gridHeight >= 200, short.gridHeight);
   await resizeTo(1280, 800);
   await waitForSettledMap();
   const restored = await state();
-  check('13. restoring the size brings the map back', restored.shown && restored.toggle?.disabled === false, restored.toggle);
+  check('13. restoring the size brings the map back', restored.shown && restored.toggle?.ariaDisabled === null && restored.toggle?.pressed === 'true' && restored.toggle?.description === '', restored.toggle);
 
   // ---- 14. forced colors
   const normalSample = await sampleBase();
@@ -398,6 +457,46 @@ async function browserChecks() {
 
   // ---- 16. performance on the deep fixture
   await performanceChecks();
+}
+
+/**
+ * Where the app's menu should sit when asked for at a point: the point itself, kept on screen the
+ * way the menu keeps itself on screen. Within a pixel, since the menu's box is read back.
+ */
+const menuIsAt = (menu, x, y) =>
+  Math.abs(menu.left - Math.max(4, Math.min(x, menu.viewport.width - 240))) <= 1 &&
+  Math.abs(menu.top - Math.max(4, Math.min(y, menu.viewport.height - menu.items * 30 - 16))) <= 1;
+
+/** Check 18: a right-click, the Menu key, and Shift+F10 on the map each open the app's menu for the right file. */
+async function contextMenuChecks() {
+  const shellMenuCalls = () => ev('window.__sp.shellMenuCalls.length');
+  const callsBefore = await shellMenuCalls();
+  const [target] = await ev('window.__ux7.largestFiles(1)');
+  await mouse('mouseMoved', target.x, target.y);
+  await sleep(200);
+  const targetName = (await state()).tooltip;
+  await mouse('mousePressed', target.x, target.y, { button: 'right' });
+  await mouse('mouseReleased', target.x, target.y, { button: 'right' });
+  await sleep(300);
+  const byPointer = await ev('window.__ux7.menu()');
+  const selectedByPointer = (await state()).selectedName;
+  check('18. a right-click on a file rectangle opens the app\'s file menu at the pointer', byPointer?.label === 'File actions' && byPointer.items > 0 && menuIsAt(byPointer, target.x, target.y), { menu: byPointer, at: target });
+  check('18. and selects that file', targetName !== null && selectedByPointer === targetName, { tooltip: targetName, selected: selectedByPointer });
+  await key('Escape');
+  check('18. Escape closes it', (await ev('window.__ux7.menu()')) === null);
+
+  // The file under the pointer is now selected, so the keys open the menu at its rectangle's middle.
+  for (const [name, press] of [['the Menu key', () => key('ContextMenu')], ['Shift+F10', () => key('F10', { shift: true })]]) {
+    await mouse('mouseMoved', 5, 5);
+    await ev(`document.querySelector('[data-map-stage]').focus()`);
+    await press();
+    await sleep(300);
+    const byKey = await ev('window.__ux7.menu()');
+    check(`18. ${name} on the focused map opens the menu at the selected rectangle`, byKey?.label === 'File actions' && menuIsAt(byKey, target.x, target.y) && (await state()).selectedName === targetName, { menu: byKey, at: target });
+    await key('Escape');
+    await sleep(100);
+  }
+  check('18. no Windows menu was asked for (there is none in a plain browser)', (await shellMenuCalls()) === callsBefore, await shellMenuCalls());
 }
 
 /** Runs the deep search while recording main-thread long tasks. Returns the tasks and the map's timings. */
@@ -436,7 +535,9 @@ const hoverCost = () =>
   })()`);
 
 async function performanceChecks() {
+  await ev('window.__ux7.recordPosts()');
   const withMap = await deepSearchWithLongTasks();
+  const posts = await ev('window.__ux7.postStats()');
   const settled = await ev('window.__spMapProbe.timings()');
   // More layouts of the same settled rows, to see the spread.
   const relayouts = [];
@@ -462,6 +563,7 @@ async function performanceChecks() {
   measured('16. settled layout (ms)', { layout: round(settled.layout), paint: round(settled.paint), index: round(settled.index) });
   measured('16. relayouts of the settled rows (ms)', relayouts.map((entry) => ({ view: entry.view, layout: round(entry.layout), paint: round(entry.paint), index: round(entry.index) })));
   measured('16. hover per move (ms)', hover);
+  measured(`16. posting rows to the worker during the search (ms per batch, budget ${BUDGET.postMs})`, posts);
   measured('16. long tasks with the map', withMap);
   measured('16. long tasks with the map collapsed', withoutMap);
   const extraTotal = withMap.total - withoutMap.total;
@@ -472,6 +574,7 @@ async function performanceChecks() {
   check(`16. worker paint under ${BUDGET.paintMs} ms`, settled.paint < BUDGET.paintMs, round(settled.paint));
   check(`16. hit index build under ${BUDGET.indexMs} ms`, settled.index < BUDGET.indexMs, round(settled.index));
   check(`16. hover under ${BUDGET.hoverMs} ms per move (95th percentile)`, hover.p95 < BUDGET.hoverMs, hover);
+  check(`16. every batch of rows reaches the worker in under ${BUDGET.postMs} ms (all ${posts.records.toLocaleString('en-US')} rows went)`, posts.adds > 0 && posts.records === 100_000 && posts.max < BUDGET.postMs, posts);
   check(`16. the map adds no long task over ${BUDGET.longTaskMs} ms`, mapOnlyLongest <= 0, { withMap: withMap.tasks, withoutMap: withoutMap.tasks });
   check(`16. the map adds under ${BUDGET.extraLongTaskTotalMs} ms of long-task time`, extraTotal < BUDGET.extraLongTaskTotalMs, { withMap: withMap.total, withoutMap: withoutMap.total });
 
@@ -522,7 +625,7 @@ try {
   page = await openPage(real ? { onEvent } : { webSocketDebuggerUrl: edge.webSocketDebuggerUrl, onEvent });
   ({ send, ev, key, mouse, setField } = page);
   if (real) {
-    for (let number = 1; number <= 16; number++) skip(`${number}.`, 'runs in headless Edge: node ux7.mjs');
+    for (const number of [...Array.from({ length: 16 }, (_, index) => index + 1), 18]) skip(`${number}.`, 'runs in headless Edge: node ux7.mjs');
     await realChecks();
   } else {
     await browserChecks();

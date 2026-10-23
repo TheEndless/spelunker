@@ -3,6 +3,7 @@
 # address inside the app (tauri.localhost), never the dev server (localhost:5173). Run it with no
 # dev server running and no other copy of Spelunker open (only one copy can run at a time).
 param([string]$Exe = (Join-Path $PSScriptRoot '..\..\target\release\Spelunker.exe'))
+& (Join-Path $PSScriptRoot 'assert-no-spelunker.ps1')
 $exe = (Resolve-Path $Exe).Path
 $profile = Join-Path $PSScriptRoot '.release-profile'
 if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
