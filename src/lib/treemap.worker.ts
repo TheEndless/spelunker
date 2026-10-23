@@ -88,7 +88,6 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   const full = layoutTree(root, { files: tree.fileCount, folders: tree.folderCount }, {
     width: view.width, height: view.height, metric: view.metric, now: startedAt,
   });
-  const layoutMs = performance.now() - layoutStarted;
 
   let painted = false;
   let paintMs = 0;
@@ -121,10 +120,14 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   // `trimmed` owns fresh copies of the per-rectangle arrays, but its summary arrays are shared with
   // `full`. Nothing below this point reads either layout, so transferring all of their buffers is safe.
   const trimmed = trim(full);
+  const crumbs = crumbsFor(root);
+  const largestFolder = tree.folderById(full.largestChildFolderId)?.name ?? '';
+  // Everything this layout cost apart from painting, so the reported time is the whole price of one.
+  const layoutMs = performance.now() - layoutStarted - paintMs;
   send(
     {
-      type: 'layout', sequence, layout: trimmed, crumbs: crumbsFor(root), zoomFolderId: root.id, painted,
-      largestFolder: largestFolderName(root, view.metric), elapsedMs: { layout: layoutMs, paint: paintMs },
+      type: 'layout', sequence, layout: trimmed, crumbs, zoomFolderId: root.id, painted,
+      largestFolder, elapsedMs: { layout: layoutMs, paint: paintMs },
     },
     buffersOf(trimmed),
   );
@@ -133,26 +136,6 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
 function nameOfRect(layout: Layout, rect: number): string {
   const file = tree.folderById(layout.folderId[rect])?.files.find((candidate) => candidate.id === layout.id[rect]);
   return file?.name ?? '';
-}
-
-/** The name of the subfolder of `root` that carries the most weight, or empty when it has none. */
-function largestFolderName(root: FolderNode, metric: Metric): string {
-  const weightOfFolder = (node: FolderNode): number => {
-    let sum = 0;
-    for (const file of node.files) sum += metric === 'size' ? file.size : file.hits;
-    for (const child of node.folders.values()) sum += weightOfFolder(child);
-    return sum;
-  };
-  let best: FolderNode | null = null;
-  let bestWeight = -1;
-  for (const child of root.folders.values()) {
-    const weight = weightOfFolder(child);
-    if (weight > bestWeight) {
-      bestWeight = weight;
-      best = child;
-    }
-  }
-  return best ? best.name : '';
 }
 
 function locate(requestId: number, fileId: number, send: Send) {

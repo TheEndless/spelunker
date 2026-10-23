@@ -62,64 +62,93 @@ export interface Layout {
   totalWeight: number;
   categoryWeight: Float64Array;
   ageWeight: Float64Array;
+  /** The child folder of the laid-out folder that carries the most weight, or -1 when it has none. */
+  largestChildFolderId: number;
 }
 
-interface Summary {
-  weight: number;
+/*
+ * Every folder's totals live in one flat slab, one row per folder, so summing a tree of a hundred
+ * thousand folders allocates once instead of twice per folder. Rows are numbered in depth-first
+ * order from the laid-out folder, which is row 0, so a folder's children follow it and a child's
+ * row is found from its parent's row and the subtree sizes of the siblings before it.
+ */
+const WEIGHT = 0;
+const FILES = 1;
+const ZERO_WEIGHT = 2;
+/** Folders in the subtree, the folder itself included. */
+const SUBTREE_FOLDERS = 3;
+const CATEGORY_START = 4;
+const AGE_START = CATEGORY_START + CATEGORY_COUNT;
+const SUMMARY_STRIDE = AGE_START + AGE_BUCKET_COUNT;
+
+/** What a small-files group shows, worked out when the group is made. */
+interface GroupSummary {
   files: number;
-  zeroWeight: number;
-  category: Float64Array;
-  age: Float64Array;
+  category: number;
+  age: number;
 }
 
 interface Item {
   weight: number;
   file: TreeFile | null;
   folder: FolderNode | null;
-  summary: Summary | null;
-  isGroup: boolean;
-}
-
-const emptySummary = (): Summary => ({
-  weight: 0,
-  files: 0,
-  zeroWeight: 0,
-  category: new Float64Array(CATEGORY_COUNT),
-  age: new Float64Array(AGE_BUCKET_COUNT),
-});
-
-function addSummary(target: Summary, source: Summary): void {
-  target.weight += source.weight;
-  target.files += source.files;
-  target.zeroWeight += source.zeroWeight;
-  for (let i = 0; i < CATEGORY_COUNT; i++) target.category[i] += source.category[i];
-  for (let i = 0; i < AGE_BUCKET_COUNT; i++) target.age[i] += source.age[i];
+  /** The folder's row in the summary slab, or -1 for a file or a group. */
+  folderRow: number;
+  group: GroupSummary | null;
 }
 
 const weightOf = (file: TreeFile, metric: Metric) => (metric === 'size' ? file.size : file.hits);
 
-function indexOfLargest(values: Float64Array): number {
+/** The position of the largest of `count` values starting at `start`, counted from `start`. The first wins a tie. */
+function indexOfLargest(values: Float64Array, start: number, count: number): number {
   let best = 0;
-  for (let i = 1; i < values.length; i++) if (values[i] > values[best]) best = i;
+  for (let i = 1; i < count; i++) if (values[start + i] > values[start + best]) best = i;
   return best;
 }
 
-function summarize(node: FolderNode, metric: Metric, now: number, cache: Map<FolderNode, Summary>): Summary {
-  const summary = emptySummary();
-  for (const file of node.files) {
-    const weight = weightOf(file, metric);
-    summary.files += 1;
-    if (weight > 0) {
-      summary.weight += weight;
-      summary.category[file.category] += weight;
-      summary.age[ageBucket(file.modifiedMs, now)] += weight;
-    } else {
-      summary.zeroWeight += 1;
+/** Adds one slab row into another. */
+function addRow(values: Float64Array, target: number, source: number): void {
+  for (let i = 0; i < SUMMARY_STRIDE; i++) values[target + i] += values[source + i];
+}
+
+/** Totals for `root` and every folder below it, one slab row each in depth-first order. */
+function summarize(root: FolderNode, folderCapacity: number, metric: Metric, now: number): Float64Array {
+  const slab = new Float64Array(folderCapacity * SUMMARY_STRIDE);
+  /** Fills the rows of `node`'s subtree from `row` on and returns the row after them. */
+  const walk = (node: FolderNode, row: number): number => {
+    const base = row * SUMMARY_STRIDE;
+    for (const file of node.files) {
+      const weight = weightOf(file, metric);
+      slab[base + FILES] += 1;
+      if (weight > 0) {
+        slab[base + WEIGHT] += weight;
+        slab[base + CATEGORY_START + file.category] += weight;
+        slab[base + AGE_START + ageBucket(file.modifiedMs, now)] += weight;
+      } else {
+        slab[base + ZERO_WEIGHT] += 1;
+      }
     }
+    let next = row + 1;
+    for (const child of node.folders.values()) {
+      const childRow = next;
+      next = walk(child, childRow);
+      addRow(slab, base, childRow * SUMMARY_STRIDE);
+    }
+    // The children's subtree sizes were added in with their rows, so this sets the total afresh.
+    slab[base + SUBTREE_FOLDERS] = next - row;
+    return next;
+  };
+  walk(root, 0);
+  return slab;
+}
+
+/** Calls `visit` with each child folder of the folder at `row` and the child's own row. */
+function forEachChildRow(slab: Float64Array, node: FolderNode, row: number, visit: (child: FolderNode, childRow: number) => void): void {
+  let childRow = row + 1;
+  for (const child of node.folders.values()) {
+    visit(child, childRow);
+    childRow += slab[childRow * SUMMARY_STRIDE + SUBTREE_FOLDERS];
   }
-  for (const child of node.folders.values()) addSummary(summary, summarize(child, metric, now, cache));
-  cache.set(node, summary);
-  return summary;
 }
 
 /** The standard squarified treemap row builder (Bruls, Huizing, van Wijk). `items` are in descending weight order. */
@@ -188,8 +217,17 @@ export function layoutTree(
   const inset = options.inset ?? 1;
   const insetMinSide = options.insetMinSide ?? 8;
 
-  const cache = new Map<FolderNode, Summary>();
-  const rootSummary = summarize(root, metric, now, cache);
+  const slab = summarize(root, counts.folders + 1, metric, now);
+
+  let largestChildFolderId = -1;
+  let largestChildWeight = -1;
+  forEachChildRow(slab, root, 0, (child, childRow) => {
+    const weight = slab[childRow * SUMMARY_STRIDE + WEIGHT];
+    if (weight > largestChildWeight) {
+      largestChildWeight = weight;
+      largestChildFolderId = child.id;
+    }
+  });
 
   const capacity = counts.files + counts.folders + 2;
   const layout: Layout = {
@@ -212,12 +250,17 @@ export function layoutTree(
     frameW: new Float32Array(counts.folders + 1),
     frameH: new Float32Array(counts.folders + 1),
     frameFolderId: new Int32Array(counts.folders + 1),
-    omitted: rootSummary.zeroWeight,
-    totalFiles: rootSummary.files,
-    totalWeight: rootSummary.weight,
-    categoryWeight: rootSummary.category,
-    ageWeight: rootSummary.age,
+    omitted: slab[ZERO_WEIGHT],
+    totalFiles: slab[FILES],
+    totalWeight: slab[WEIGHT],
+    // Copies with buffers of their own: the worker transfers every buffer of the layout, and two
+    // views on one buffer in a transfer list cannot be sent.
+    categoryWeight: slab.slice(CATEGORY_START, CATEGORY_START + CATEGORY_COUNT),
+    ageWeight: slab.slice(AGE_START, AGE_START + AGE_BUCKET_COUNT),
+    largestChildFolderId,
   };
+  /** Reused for each small-files group, whose totals are read as soon as they are summed. */
+  const groupRow = new Float64Array(SUMMARY_STRIDE);
 
   const emit = (
     kind: number, id: number, x: number, y: number, w: number, h: number, depth: number,
@@ -236,16 +279,16 @@ export function layoutTree(
     layout.frameFolderId[i] = folderId;
   };
 
-  const fill = (node: FolderNode, x: number, y: number, w: number, h: number, depth: number) => {
+  const fill = (node: FolderNode, row: number, x: number, y: number, w: number, h: number, depth: number) => {
     const items: Item[] = [];
     for (const file of node.files) {
       const weight = weightOf(file, metric);
-      if (weight > 0) items.push({ weight, file, folder: null, summary: null, isGroup: false });
+      if (weight > 0) items.push({ weight, file, folder: null, folderRow: -1, group: null });
     }
-    for (const child of node.folders.values()) {
-      const summary = cache.get(child)!;
-      if (summary.weight > 0) items.push({ weight: summary.weight, file: null, folder: child, summary, isGroup: false });
-    }
+    forEachChildRow(slab, node, row, (child, childRow) => {
+      const weight = slab[childRow * SUMMARY_STRIDE + WEIGHT];
+      if (weight > 0) items.push({ weight, file: null, folder: child, folderRow: childRow, group: null });
+    });
     if (items.length === 0 || w <= 0 || h <= 0) return;
 
     items.sort((left, right) => right.weight - left.weight);
@@ -257,20 +300,26 @@ export function layoutTree(
     while (firstSmall > 0 && items[firstSmall - 1].weight * scale < minLeafArea) firstSmall--;
     if (items.length - firstSmall >= 2) {
       const small = items.splice(firstSmall);
-      const merged = emptySummary();
+      groupRow.fill(0);
       let mergedWeight = 0;
       for (const item of small) {
         mergedWeight += item.weight;
         if (item.file) {
-          merged.files += 1;
-          merged.weight += item.weight;
-          merged.category[item.file.category] += item.weight;
-          merged.age[ageBucket(item.file.modifiedMs, now)] += item.weight;
+          groupRow[FILES] += 1;
+          groupRow[CATEGORY_START + item.file.category] += item.weight;
+          groupRow[AGE_START + ageBucket(item.file.modifiedMs, now)] += item.weight;
         } else {
-          addSummary(merged, item.summary!);
+          const base = item.folderRow * SUMMARY_STRIDE;
+          groupRow[FILES] += slab[base + FILES];
+          for (let i = CATEGORY_START; i < SUMMARY_STRIDE; i++) groupRow[i] += slab[base + i];
         }
       }
-      items.push({ weight: mergedWeight, file: null, folder: node, summary: merged, isGroup: true });
+      const group: GroupSummary = {
+        files: groupRow[FILES],
+        category: indexOfLargest(groupRow, CATEGORY_START, CATEGORY_COUNT),
+        age: indexOfLargest(groupRow, AGE_START, AGE_BUCKET_COUNT),
+      };
+      items.push({ weight: mergedWeight, file: null, folder: node, folderRow: -1, group });
       items.sort((left, right) => right.weight - left.weight);
     }
 
@@ -280,30 +329,30 @@ export function layoutTree(
           RectKind.File, item.file.id, itemX, itemY, itemWidth, itemHeight, depth,
           item.file.category, ageBucket(item.file.modifiedMs, now), item.weight, 1, node.id,
         );
-      } else if (item.isGroup) {
-        const summary = item.summary!;
+      } else if (item.group) {
         emit(
           RectKind.SmallFiles, node.id, itemX, itemY, itemWidth, itemHeight, depth,
-          indexOfLargest(summary.category), indexOfLargest(summary.age), item.weight, summary.files, node.id,
+          item.group.category, item.group.age, item.weight, item.group.files, node.id,
         );
       } else {
         const child = item.folder!;
-        const summary = item.summary!;
         if (itemWidth < minFolderSide || itemHeight < minFolderSide) {
+          const base = item.folderRow * SUMMARY_STRIDE;
           emit(
             RectKind.FolderBlock, child.id, itemX, itemY, itemWidth, itemHeight, depth,
-            indexOfLargest(summary.category), indexOfLargest(summary.age), item.weight, summary.files, node.id,
+            indexOfLargest(slab, base + CATEGORY_START, CATEGORY_COUNT), indexOfLargest(slab, base + AGE_START, AGE_BUCKET_COUNT),
+            item.weight, slab[base + FILES], node.id,
           );
           return;
         }
         emitFrame(child.id, itemX, itemY, itemWidth, itemHeight);
         const gap = itemWidth >= insetMinSide && itemHeight >= insetMinSide ? inset : 0;
-        fill(child, itemX + gap, itemY + gap, itemWidth - 2 * gap, itemHeight - 2 * gap, depth + 1);
+        fill(child, item.folderRow, itemX + gap, itemY + gap, itemWidth - 2 * gap, itemHeight - 2 * gap, depth + 1);
       }
     });
   };
 
   emitFrame(root.id, 0, 0, width, height);
-  fill(root, 0, 0, width, height, 0);
+  fill(root, 0, 0, 0, width, height, 0);
   return layout;
 }

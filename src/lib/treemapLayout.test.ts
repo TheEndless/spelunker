@@ -149,6 +149,29 @@ describe('layoutTree', () => {
     expect(result.ageWeight[0]).toBe(10);
     expect(result.ageWeight[5]).toBe(30);
   });
+
+  it('reports the heaviest child folder of the laid-out folder, ignoring its own files', () => {
+    const tree = new FolderTree();
+    tree.add({ id: 1, folder: 'C:\\top', name: 'loose.bin', size: 500, hits: 0, modifiedMs: null });
+    tree.add({ id: 2, folder: 'C:\\top\\light', name: 'a.txt', size: 10, hits: 9, modifiedMs: null });
+    tree.add({ id: 3, folder: 'C:\\top\\heavy\\deeper', name: 'b.txt', size: 60, hits: 1, modifiedMs: null });
+    tree.add({ id: 4, folder: 'C:\\top\\heavy', name: 'c.txt', size: 5, hits: 0, modifiedMs: null });
+    const top = tree.folderOfFile(1)!;
+    const counts = { files: tree.fileCount, folders: tree.folderCount };
+    const bySize = layoutTree(top, counts, { width: 100, height: 100, metric: 'size', now: NOW });
+    expect(bySize.largestChildFolderId).toBe(tree.folderOfFile(4)!.id);
+    const byMatches = layoutTree(top, counts, { width: 100, height: 100, metric: 'matches', now: NOW });
+    expect(byMatches.largestChildFolderId).toBe(tree.folderOfFile(2)!.id);
+    const leaf = layoutTree(tree.folderOfFile(2)!, counts, { width: 100, height: 100, metric: 'size', now: NOW });
+    expect(leaf.largestChildFolderId).toBe(-1);
+  });
+
+  it('gives every typed array its own buffer, so the worker can transfer them all', () => {
+    const tree = treeOf([{ id: 1, folder: 'C:\\a\\b', size: 5 }, { id: 2, folder: 'C:\\a\\c', size: 3 }]);
+    const result = layout(tree, exact);
+    const buffers = Object.values(result).filter((value) => ArrayBuffer.isView(value)).map((view) => view.buffer);
+    expect(new Set(buffers).size).toBe(buffers.length);
+  });
 });
 
 describe('ageBucket', () => {

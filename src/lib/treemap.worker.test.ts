@@ -73,6 +73,11 @@ describe('treemap worker', () => {
     it('falls back to the top for a folder id it does not know', () => {
       expect(layout(999_999).zoomFolderId).toBe(folderId('C:'));
     });
+
+    it('names the heaviest folder directly under the laid-out folder', () => {
+      expect(layout().largestFolder).toBe('x');
+      expect(layout(folderId('C:\\z')).largestFolder).toBe('');
+    });
   });
 
   describe('locate', () => {
