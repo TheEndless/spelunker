@@ -38,16 +38,34 @@ export function addRidge(
   }
 }
 
-/** How lit the surface is at (x, y), between the minimum brightness and ambient plus diffuse. */
-export function brightnessAt(sx1: number, sx2: number, sy1: number, sy2: number, x: number, y: number): number {
-  const normalX = -(2 * sx2 * x + sx1);
-  const normalY = -(2 * sy2 * y + sy1);
+/**
+ * One axis of the surface normal at `coordinate`, from that axis's two coefficients ([sx1, sx2] or
+ * [sy1, sy2]). It depends on that axis alone, so a painter can work it out once per column and once per row.
+ */
+export function surfaceNormal(linear: number, quadratic: number, coordinate: number): number {
+  return -(2 * quadratic * coordinate + linear);
+}
+
+/** How lit a surface with the normal (normalX, normalY, 1) is. The one shading formula: brightnessAt and the painter both use it. */
+export function brightnessOfNormal(normalX: number, normalY: number): number {
   const cosine = (normalX * LIGHT_X + normalY * LIGHT_Y + LIGHT_Z) / Math.sqrt(normalX * normalX + normalY * normalY + 1);
   return Math.max(CUSHION_MIN_BRIGHTNESS, CUSHION_AMBIENT + CUSHION_DIFFUSE * Math.max(cosine, 0));
 }
 
+/** How lit the surface is at (x, y), between the minimum brightness and ambient plus diffuse. */
+export function brightnessAt(sx1: number, sx2: number, sy1: number, sy2: number, x: number, y: number): number {
+  return brightnessOfNormal(surfaceNormal(sx1, sx2, x), surfaceNormal(sy1, sy2, y));
+}
+
+/**
+ * `base * brightness` rounded half up and clamped to 0..255. The painter calls this for every channel of
+ * every pixel, and `(value + 0.5) | 0` is about twice as fast there as Math.round with Math.min and
+ * Math.max. The bounds are checked first, so `| 0` never sees a value it would wrap. The two agree
+ * everywhere except a product within one rounding step under 0.5, which this rounds to 1.
+ */
 export function shadeChannel(base: number, brightness: number): number {
-  return Math.min(255, Math.max(0, Math.round(base * brightness)));
+  const scaled = base * brightness;
+  return scaled >= 254.5 ? 255 : scaled > 0 ? (scaled + 0.5) | 0 : 0;
 }
 
 /** The average brightness of a lone ridge, which is the same at any tile size. Tests use this, not a hard-coded number. */

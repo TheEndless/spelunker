@@ -99,7 +99,7 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
     context.setTransform(view.devicePixelRatio, 0, 0, view.devicePixelRatio, 0, 0);
     const style: PaintStyle = {
       colors: view.colors, colorMode: view.colorMode, forced: view.forced, font: view.font, labelColorFor: bestTextOn,
-      pixelRatio: view.devicePixelRatio,
+      pixelRatio: view.devicePixelRatio, shading: 'flat',
     };
     paintLayout(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null, (rect) => nameOfRect(full, rect));
     painted = true;

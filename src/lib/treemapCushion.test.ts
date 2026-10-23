@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addRidge, brightnessAt, CUSHION_AMBIENT, CUSHION_DIFFUSE, CUSHION_HEIGHT, CUSHION_MIN_BRIGHTNESS,
-  loneRidgeMeanBrightness, shadeChannel,
+  addRidge, brightnessAt, brightnessOfNormal, CUSHION_AMBIENT, CUSHION_DIFFUSE, CUSHION_HEIGHT, CUSHION_MIN_BRIGHTNESS,
+  loneRidgeMeanBrightness, shadeChannel, surfaceNormal,
 } from './treemapCushion';
 
 function loneRidge(width: number, height: number): [number, number, number, number] {
@@ -77,12 +77,38 @@ describe('brightnessAt', () => {
   });
 });
 
+describe('brightnessOfNormal', () => {
+  it('equals brightnessAt when the normal is worked out one axis at a time, as the painter does per column and per row', () => {
+    const outer = [0, 0, 0, 0];
+    addRidge(outer, 0, 0, 0, 100, 60, CUSHION_HEIGHT);
+    addRidge(outer, 0, 30, 10, 90, 55, CUSHION_HEIGHT * 0.91);
+    const [sx1, sx2, sy1, sy2] = outer;
+    for (let x = -0.5; x <= 101; x += 3.7) {
+      for (let y = -0.5; y <= 61; y += 2.9) {
+        const split = brightnessOfNormal(surfaceNormal(sx1, sx2, x), surfaceNormal(sy1, sy2, y));
+        expect(Math.abs(split - brightnessAt(sx1, sx2, sy1, sy2, x, y))).toBeLessThan(1e-6);
+      }
+    }
+  });
+});
+
 describe('shadeChannel', () => {
   it('scales and clamps to a whole 0..255 value', () => {
     expect(shadeChannel(100, 1)).toBe(100);
     expect(shadeChannel(200, 1.08)).toBe(216);
     expect(shadeChannel(250, 1.08)).toBe(255);
     expect(shadeChannel(100, 0)).toBe(0);
+  });
+
+  it('rounds exactly as Math.round clamped to 0..255 would, over every base and a fine brightness sweep', () => {
+    for (let base = 0; base <= 255; base++) {
+      for (let step = -50; step <= 1300; step++) {
+        const brightness = step / 1000;
+        expect(shadeChannel(base, brightness)).toBe(Math.min(255, Math.max(0, Math.round(base * brightness))));
+      }
+    }
+    expect(shadeChannel(1e12, 1)).toBe(255);
+    expect(shadeChannel(-1e12, 1)).toBe(0);
   });
 });
 

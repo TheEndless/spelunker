@@ -223,7 +223,7 @@
     const context = baseCanvas.getContext('2d');
     if (!context) return;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    const style = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio };
+    const style = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio, shading: 'flat' as const };
     const dimmed = shownBuckets.size > 0 ? shownBuckets : null;
     paintLayout(context, current, width, height, style, dimmed, (rect) => session.rowById(current.id[rect])?.name ?? '');
   });
