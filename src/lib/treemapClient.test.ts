@@ -132,6 +132,44 @@ describe('TreemapClient', () => {
     expect(client.layout).not.toBeNull();
   });
 
+  it('lays out the last rows of a search that started and finished between two ticks', () => {
+    const { client, session, posted, canvas, emit } = setup();
+    session.running = false;
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(100);
+    // The search starts and finishes before the first tick sees it running.
+    emit().reset(1);
+    vi.advanceTimersByTime(100);
+    emit().appended([row(2), row(3)]);
+    posted.length = 0;
+    vi.advanceTimersByTime(1300);
+    expect(types(posted)).toEqual(['add', 'layout']);
+  });
+
+  it('lays out again after a row is removed once the search is over', () => {
+    const { client, session, posted, canvas, emit } = setup();
+    session.running = false;
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(2600);
+    posted.length = 0;
+    emit().removed(1);
+    vi.advanceTimersByTime(1300);
+    expect(types(posted)).toEqual(['remove', 'layout']);
+  });
+
+  it('does not lay out on a tick when nothing changed and no search runs', () => {
+    const { client, session, posted, canvas } = setup();
+    session.running = false;
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(2600);
+    posted.length = 0;
+    vi.advanceTimersByTime(5000);
+    expect(posted).toEqual([]);
+  });
+
   it('resolves locate from the worker answer', async () => {
     const { client, worker, posted, canvas } = setup();
     client.attach(canvas);

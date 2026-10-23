@@ -156,8 +156,11 @@ export class TreemapClient {
 
   private onTick(): void {
     const running = this.session.running;
-    // One more layout after the search finishes picks up the rows of its last batches.
-    if (running || this.wasRunning) this.requestLayout();
+    // One more layout after the search finishes picks up the rows of its last batches. Rows still
+    // waiting count too: a search can start and finish between two ticks, and a row can be removed
+    // after the search, and neither is ever seen running here.
+    const hasPendingChanges = this.pendingAdds.length > 0 || this.pendingRemoves.length > 0;
+    if (running || this.wasRunning || hasPendingChanges) this.requestLayout();
     this.wasRunning = running;
   }
 
