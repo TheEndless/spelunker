@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { fileCategory, previewKind } from './fileKinds';
+import { FILE_CATEGORIES, fileCategory, fileCategoryIndex, previewKind } from './fileKinds';
+
+describe('fileCategoryIndex', () => {
+  it('indexes every category in FILE_CATEGORIES order', () => {
+    expect(FILE_CATEGORIES.length).toBe(13);
+    expect(FILE_CATEGORIES[fileCategoryIndex('a.rs')]).toBe('code');
+    expect(FILE_CATEGORIES[fileCategoryIndex('a.png')]).toBe('image');
+    expect(FILE_CATEGORIES[fileCategoryIndex('a.qqq')]).toBe('other');
+  });
+  it('has no repeats', () => {
+    expect(new Set(FILE_CATEGORIES).size).toBe(FILE_CATEGORIES.length);
+  });
+});
 
 describe('previewKind', () => {
   it('shows pictures as images', () => {

@@ -48,6 +48,18 @@ export function fileCategory(name: string): FileCategory {
   return BY_EXTENSION.get(extensionOf(name)) ?? 'other';
 }
 
+/** Every category in a fixed order, so a category can be stored as a small integer. */
+export const FILE_CATEGORIES: readonly FileCategory[] = [
+  'code', 'text', 'data', 'image', 'pdf', 'audio', 'video', 'archive', 'document', 'sheet', 'slides', 'executable', 'other',
+];
+
+const CATEGORY_INDEX = new Map<FileCategory, number>(FILE_CATEGORIES.map((category, index) => [category, index]));
+
+/** Position of the file's category in FILE_CATEGORIES. */
+export function fileCategoryIndex(name: string): number {
+  return CATEGORY_INDEX.get(fileCategory(name))!;
+}
+
 export type PreviewKind = 'image' | 'pdf' | 'audio' | 'video' | 'text' | 'other';
 
 /** Formats the webview can show as pictures, even though some are in the wider "image" category. */
