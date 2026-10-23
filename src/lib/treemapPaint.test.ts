@@ -3,6 +3,7 @@ import { bestTextOn } from './colors';
 import { paintCushion, paintLayout, paintMap, type Context2D, type PaintStyle } from './treemapPaint';
 import { AGE_BUCKET_COUNT, CATEGORY_COUNT, layoutTree, RectKind, type Layout } from './treemapLayout';
 import { FolderTree } from './treemapTree';
+import { deepRow } from './mockBackend';
 import { labelColorOn, mapColors } from './treemapColors';
 import { PALETTES } from './palettes';
 import { addRidge, brightnessAt, CUSHION_HEIGHT, CUSHION_SCALE, shadeChannel } from './treemapCushion';
@@ -380,6 +381,39 @@ describe('paintCushion', () => {
       const row = Math.round(10 * devicePixelRatio);
       for (let px = 0; px < Math.round(20 * devicePixelRatio); px++) expect(isBackground(pixelAt(px, row))).toBe(false);
     }
+  });
+
+  it('covers every device pixel of a gapless deep layout at fractional and whole ratios', () => {
+    // The deep fixture's uneven sizes and nesting give a few thousand rectangles whose shared edges
+    // fall between pixels. With no inset the tiles tile the root frame, so a background pixel anywhere
+    // is a gap between neighbours that rounded their shared edge apart. Nothing is excluded: a
+    // rectangle under half a CSS pixel paints exactly the pixels its own edges round to (the sliver
+    // rule), and one whose edges round to the same pixel leaves its neighbours meeting there.
+    // Two fixture sizes, since which ratios a float32 disagreement shows at depends on the layout.
+    const marked = { ...colors, background: '#FF00FF' };
+    const gaps: Record<string, number> = {};
+    for (const files of [6000, 12000]) {
+      const tree = new FolderTree();
+      for (let index = 0; index < files; index++) {
+        const row = deepRow(index);
+        const cut = row.path.lastIndexOf('\\');
+        tree.add({ id: index, folder: row.path.slice(0, cut), name: row.path.slice(cut + 1), size: row.size, hits: row.hits, modifiedMs: row.modifiedMs });
+      }
+      const layout = layoutTree(tree.root, { files: tree.fileCount, folders: tree.folderCount }, { width: 1600, height: 700, metric: 'size', now: 0, inset: 0 });
+      expect(layout.count).toBeGreaterThan(2000);
+      for (const devicePixelRatio of [1, 1.25, 1.5, 2]) {
+        const { context, calls } = fakeContext();
+        paintCushion(context, layout, 1600, 700, cushion({ colors: marked, pixelRatio: devicePixelRatio }), null, null);
+        const [width, height] = calls.find((call) => call.name === 'putImageData')!.args as [number, number];
+        const pixels = context.getImageData(0, 0, width, height).data;
+        let background = 0;
+        for (let offset = 0; offset < pixels.length; offset += 4) {
+          if (pixels[offset] === 0xff && pixels[offset + 1] === 0x00 && pixels[offset + 2] === 0xff) background++;
+        }
+        gaps[`${files} files at ${devicePixelRatio}`] = background;
+      }
+    }
+    expect(gaps).toEqual(Object.fromEntries(Object.keys(gaps).map((name) => [name, 0])));
   });
 
   it('writes nothing and throws nothing for a zero-size rectangle', () => {

@@ -277,7 +277,11 @@ export function layoutTree(
     inherited: ArrayLike<number>,
   ) => {
     const i = layout.count++;
-    layout.x[i] = x; layout.y[i] = y; layout.w[i] = w; layout.h[i] = h;
+    // The size is stored as the distance between the stored edges, not rounded on its own. A
+    // neighbour starts at `x + w` rounded to Float32, so this keeps the two agreeing on their shared
+    // edge in Float32: rounding x and w apart could leave a one-pixel background line between them.
+    layout.x[i] = x; layout.y[i] = y;
+    layout.w[i] = Math.fround(x + w) - Math.fround(x); layout.h[i] = Math.fround(y + h) - Math.fround(y);
     layout.id[i] = id; layout.kind[i] = kind; layout.depth[i] = Math.min(depth, 255);
     layout.category[i] = category; layout.age[i] = age; layout.weight[i] = weight;
     layout.fileCount[i] = fileCount; layout.folderId[i] = folderId;
