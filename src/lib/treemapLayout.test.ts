@@ -166,6 +166,18 @@ describe('layoutTree', () => {
     expect(leaf.largestChildFolderId).toBe(-1);
   });
 
+  it('reports no largest child folder when every child folder has no weight', () => {
+    const tree = new FolderTree();
+    tree.add({ id: 1, folder: 'C:\\top', name: 'loose.bin', size: 500, hits: 3, modifiedMs: null });
+    tree.add({ id: 2, folder: 'C:\\top\\a', name: 'a.txt', size: 10, hits: 0, modifiedMs: null });
+    tree.add({ id: 3, folder: 'C:\\top\\b', name: 'b.txt', size: 10, hits: 0, modifiedMs: null });
+    const top = tree.folderOfFile(1)!;
+    const counts = { files: tree.fileCount, folders: tree.folderCount };
+    const byMatches = layoutTree(top, counts, { width: 100, height: 100, metric: 'matches', now: NOW });
+    expect(byMatches.largestChildFolderId).toBe(-1);
+    expect(tree.folderById(byMatches.largestChildFolderId)).toBeUndefined();
+  });
+
   it('gives every typed array its own buffer, so the worker can transfer them all', () => {
     const tree = treeOf([{ id: 1, folder: 'C:\\a\\b', size: 5 }, { id: 2, folder: 'C:\\a\\c', size: 3 }]);
     const result = layout(tree, exact);

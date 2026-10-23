@@ -14,6 +14,8 @@ export const ADD_CHUNK_SIZE = 10_000;
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;
   onmessage: ((event: MessageEvent) => void) | null;
+  onerror?: ((event: ErrorEvent) => void) | null;
+  onmessageerror?: ((event: MessageEvent) => void) | null;
   terminate(): void;
 }
 
@@ -114,6 +116,9 @@ export class TreemapClient {
     if (!this.worker) {
       this.worker = this.createWorker();
       this.worker.onmessage = (event) => this.receive(event.data as FromWorker);
+      // A worker that crashes mid-layout never answers, so without these the layout in flight would stay in flight.
+      this.worker.onerror = () => this.abandonLayout();
+      this.worker.onmessageerror = () => this.abandonLayout();
       this.post({ type: 'reset', now: this.startedAtMs ?? Date.now() });
       this.postAdds(this.session.rows.map(toRecord));
     }
@@ -196,17 +201,43 @@ export class TreemapClient {
     this.post({ type: 'layout', sequence, view: { ...this.view, zoomFolderId: this.zoomFolderId } });
   }
 
+  /** The layout in flight was answered. Sends the one remembered request, if any, for the view as it is now. */
+  private finishLayout(sequence: number): void {
+    if (sequence !== this.sequence) return;
+    this.layoutInFlight = false;
+    if (this.layoutWanted) {
+      this.layoutWanted = false;
+      this.requestLayout();
+    } else {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * A layout was lost: the worker threw, or died, or sent something unreadable. The previous picture
+   * stays. The canvas it was painted on may be empty, so the next tick lays out again. That retry is
+   * never immediate, so a worker that fails every time costs one request per tick and no more.
+   */
+  private abandonLayout(): void {
+    this.layoutInFlight = false;
+    this.layoutWanted = false;
+    this.busy = false;
+    this.changedSinceLayout = true;
+  }
+
   private receive(message: FromWorker): void {
+    if (message.type === 'layoutFailed') {
+      if (import.meta.env.DEV) console.warn(`Map layout failed: ${message.message}`);
+      this.viewVersionOfSequence.delete(message.sequence);
+      if (message.sequence !== this.sequence) return;
+      // A request made meanwhile is a view change, so it is honored once. It cannot repeat on its own.
+      const wanted = this.layoutWanted;
+      this.abandonLayout();
+      if (wanted) this.requestLayout();
+      return;
+    }
     if (message.type === 'layout') {
-      if (message.sequence === this.sequence) {
-        this.layoutInFlight = false;
-        if (this.layoutWanted) {
-          this.layoutWanted = false;
-          this.requestLayout();
-        } else {
-          this.busy = false;
-        }
-      }
+      this.finishLayout(message.sequence);
       const requestedFor = this.viewVersionOfSequence.get(message.sequence);
       this.viewVersionOfSequence.delete(message.sequence);
       // Replies come back in order. One made for an earlier view is out of date, but one made

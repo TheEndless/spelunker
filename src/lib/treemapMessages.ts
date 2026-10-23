@@ -54,5 +54,7 @@ export type FromWorker =
       largestFolder: string;
       elapsedMs: { layout: number; paint: number };
     }
+  /** The worker threw while laying out or painting `sequence`. The page keeps its previous picture and tries again later. */
+  | { type: 'layoutFailed'; sequence: number; message: string }
   | ({ type: 'located'; requestId: number } & Located)
   | { type: 'described'; requestId: number; path: string };

@@ -191,7 +191,17 @@ export function handleMessage(message: ToWorker, send: Send): void {
       for (const id of message.ids) tree.remove(id);
       break;
     case 'layout':
-      layoutAndPaint(message.sequence, message.view, send);
+      // Always answer the sequence: the page lays out one request at a time and waits for this reply.
+      try {
+        layoutAndPaint(message.sequence, message.view, send);
+      } catch (e) {
+        // The canvas may have been resized and partly painted. Emptying it leaves no half picture.
+        if (offscreen) {
+          offscreen.width = 0;
+          offscreen.height = 0;
+        }
+        send({ type: 'layoutFailed', sequence: message.sequence, message: e instanceof Error ? `${e.name}: ${e.message}` : String(e) });
+      }
       break;
     case 'locate':
       locate(message.requestId, message.fileId, send);

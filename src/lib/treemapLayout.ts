@@ -220,7 +220,8 @@ export function layoutTree(
   const slab = summarize(root, counts.folders + 1, metric, now);
 
   let largestChildFolderId = -1;
-  let largestChildWeight = -1;
+  // A child with no weight is not the largest, so a folder whose children all weigh nothing has none.
+  let largestChildWeight = 0;
   forEachChildRow(slab, root, 0, (child, childRow) => {
     const weight = slab[childRow * SUMMARY_STRIDE + WEIGHT];
     if (weight > largestChildWeight) {

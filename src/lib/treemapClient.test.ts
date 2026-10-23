@@ -19,7 +19,10 @@ const layoutReply = (sequence: number) => ({
 
 function setup() {
   const posted: Array<{ message: any; transfer?: unknown[] }> = [];
-  const worker: WorkerLike = { postMessage: (message, transfer) => posted.push({ message, transfer }), onmessage: null, terminate: vi.fn() };
+  const worker: WorkerLike = {
+    postMessage: (message, transfer) => posted.push({ message, transfer }),
+    onmessage: null, onerror: null, onmessageerror: null, terminate: vi.fn(),
+  };
   const createWorker = vi.fn(() => worker);
   let listener!: SessionListener;
   const session = {
@@ -186,6 +189,94 @@ describe('TreemapClient', () => {
     worker.onmessage!({ data: layoutReply(1) } as MessageEvent);
     expect(client.layout).not.toBeNull();
     expect(layoutPosts()).toHaveLength(2);
+  });
+
+  describe('when the worker fails a layout', () => {
+    const failed = (sequence: number) => ({ type: 'layoutFailed', sequence, message: 'boom' });
+
+    it('clears the layout in flight so a later view change posts a new one', () => {
+      const { client, worker, canvas, layoutPosts } = setup();
+      client.setView(view(100));
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      expect(layoutPosts()).toHaveLength(1);
+      worker.onmessage!({ data: failed(1) } as MessageEvent);
+      expect(client.busy).toBe(false);
+      client.setView(view(120));
+      vi.advanceTimersByTime(100);
+      expect(layoutPosts()).toHaveLength(2);
+    });
+
+    it('asks exactly once more when a request was wanted, and keeps the previous layout', () => {
+      const { client, worker, posted, canvas, layoutPosts, answer } = setup();
+      client.setView(view(100));
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      answer();
+      const previousLayout = client.layout;
+      expect(previousLayout).not.toBeNull();
+      client.setView(view(110));
+      vi.advanceTimersByTime(100);
+      client.setView(view(120));
+      vi.advanceTimersByTime(100);
+      expect(layoutPosts()).toHaveLength(2);
+      posted.length = 0;
+      worker.onmessage!({ data: failed(2) } as MessageEvent);
+      expect(types(posted)).toEqual(['layout']);
+      expect(posted[0].message.view.width).toBe(120);
+      expect(client.layout).toBe(previousLayout);
+      expect(client.busy).toBe(true);
+    });
+
+    it('recovers from an uncaught worker error on the next tick', () => {
+      const { client, worker, canvas, layoutPosts } = setup();
+      client.setView(view());
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      expect(layoutPosts()).toHaveLength(1);
+      worker.onerror!({} as ErrorEvent);
+      expect(client.busy).toBe(false);
+      vi.advanceTimersByTime(1300);
+      expect(layoutPosts()).toHaveLength(2);
+    });
+
+    it('recovers from an unreadable message on the next view change', () => {
+      const { client, worker, canvas, layoutPosts } = setup();
+      client.setView(view(100));
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      worker.onmessageerror!({} as MessageEvent);
+      client.setView(view(120));
+      vi.advanceTimersByTime(100);
+      expect(layoutPosts()).toHaveLength(2);
+    });
+
+    it('does not request again at once after an error, even when a request was wanted', () => {
+      const { client, worker, canvas, layoutPosts } = setup();
+      client.setView(view(100));
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      client.setView(view(120));
+      vi.advanceTimersByTime(100);
+      worker.onerror!({} as ErrorEvent);
+      expect(layoutPosts()).toHaveLength(1);
+      vi.advanceTimersByTime(1300);
+      expect(layoutPosts()).toHaveLength(2);
+    });
+
+    it('posts one layout per tick, not a storm, when every layout fails', () => {
+      const { client, worker, canvas, layoutPosts } = setup();
+      client.setView(view());
+      client.attach(canvas);
+      vi.advanceTimersByTime(100);
+      for (let tick = 0; tick < 5; tick++) {
+        worker.onmessage!({ data: failed(layoutPosts().at(-1).sequence) } as MessageEvent);
+        expect(layoutPosts()).toHaveLength(tick + 1);
+        vi.advanceTimersByTime(1200);
+      }
+      worker.onerror!({} as ErrorEvent);
+      expect(layoutPosts()).toHaveLength(6);
+    });
   });
 
   it('lays out the last rows of a search that started and finished between two ticks', () => {

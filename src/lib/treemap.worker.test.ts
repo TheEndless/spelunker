@@ -52,6 +52,35 @@ describe('treemap worker', () => {
     replies = [];
   });
 
+  describe('a layout that throws', () => {
+    // Painting throws once the canvas was resized, which is the worst moment to fail.
+    const throwingCanvas = () => ({
+      width: 0, height: 0,
+      getContext: () => ({ setTransform: () => { throw new RangeError('boom'); } }),
+    }) as unknown as OffscreenCanvas;
+    const noContextCanvas = () => ({ getContext: () => null }) as unknown as OffscreenCanvas;
+
+    it('still answers its sequence, saying it failed', () => {
+      load([record(1, 'C:\\a', 10)]);
+      const canvas = throwingCanvas();
+      handleMessage({ type: 'attach', canvas }, send);
+      try {
+        handleMessage({ type: 'layout', sequence: 4242, view: view(null) }, send);
+      } finally {
+        handleMessage({ type: 'attach', canvas: noContextCanvas() }, send);
+      }
+      expect(replies.at(-1)).toEqual({ type: 'layoutFailed', sequence: 4242, message: 'RangeError: boom' });
+      // The canvas was resized before the failure, so it is emptied rather than left half painted.
+      expect(canvas.width).toBe(0);
+      expect(canvas.height).toBe(0);
+    });
+
+    it('lays out normally afterwards', () => {
+      load([record(1, 'C:\\a', 10)]);
+      expect(layout().type).toBe('layout');
+    });
+  });
+
   describe('zoom fallback', () => {
     beforeEach(() =>
       load([
