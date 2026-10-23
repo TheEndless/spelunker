@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { startPointerDrag } from './dragHandle';
   import { clampPreviewWidth, PREVIEW_MIN_WIDTH, resizePreviewWithKey, RESULTS_MIN_WIDTH } from './paneSplit';
 
   interface Props {
@@ -35,29 +36,20 @@
   onMount(refreshValues);
 
   function onPointerDown(event: PointerEvent) {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    const handle = event.currentTarget as HTMLElement;
-    // Capturing the pointer keeps the drag going when it leaves the thin handle, and over the preview's iframe.
-    handle.setPointerCapture(event.pointerId);
-    const startX = event.clientX;
-    const startWidth = measure().preview;
-    dragging = true;
-    const move = (moveEvent: PointerEvent) => {
+    startPointerDrag(event, {
+      axis: 'x',
+      startSize: () => measure().preview,
+      onStart: () => {
+        dragging = true;
+      },
       // Dragging left moves the preview's edge left, which makes it wider.
-      onResize(clampPreviewWidth(startWidth + (startX - moveEvent.clientX), measure().container));
-    };
-    const stop = () => {
-      dragging = false;
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', stop);
-      handle.removeEventListener('pointercancel', stop);
-      onCommit();
-      refreshValues();
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', stop);
-    handle.addEventListener('pointercancel', stop);
+      onMove: (startWidth, distance) => onResize(clampPreviewWidth(startWidth - distance, measure().container)),
+      onStop: () => {
+        dragging = false;
+        onCommit();
+        refreshValues();
+      },
+    });
   }
 
   function onKeydown(event: KeyboardEvent) {

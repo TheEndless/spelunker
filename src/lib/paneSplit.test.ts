@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  clampMapHeight,
+  GRID_MIN_HEIGHT,
+  MAP_MIN_HEIGHT,
+  mapFits,
+  normalizeMapHeight,
+  resizeMapWithKey,
   clampPreviewWidth,
   normalizePreviewWidth,
   PREVIEW_MIN_WIDTH,
@@ -55,6 +61,33 @@ describe('resizePreviewWithKey', () => {
   it('ignores other keys', () => {
     expect(resizePreviewWithKey(400, 'a', false, 1280)).toBeNull();
     expect(resizePreviewWithKey(400, 'ArrowUp', false, 1280)).toBeNull();
+  });
+});
+
+describe('map height', () => {
+  it('clamps between the minimum and what leaves the grid its minimum', () => {
+    expect(clampMapHeight(10, 800)).toBe(MAP_MIN_HEIGHT);
+    expect(clampMapHeight(9999, 800)).toBe(800 - GRID_MIN_HEIGHT);
+    expect(clampMapHeight(300, 800)).toBe(300);
+  });
+  it('keeps the minimum when the container is too short for both', () => {
+    expect(clampMapHeight(300, 200)).toBe(MAP_MIN_HEIGHT);
+  });
+  it('grows with ArrowUp and shrinks with ArrowDown', () => {
+    expect(resizeMapWithKey(300, 'ArrowUp', false, 800)).toBe(316);
+    expect(resizeMapWithKey(300, 'ArrowDown', true, 800)).toBe(252);
+    expect(resizeMapWithKey(300, 'Home', false, 800)).toBe(MAP_MIN_HEIGHT);
+    expect(resizeMapWithKey(300, 'End', false, 800)).toBe(800 - GRID_MIN_HEIGHT);
+    expect(resizeMapWithKey(300, 'x', false, 800)).toBeNull();
+  });
+  it('normalizes a stored height', () => {
+    expect(normalizeMapHeight(260.4)).toBe(260);
+    expect(normalizeMapHeight(10)).toBeNull();
+    expect(normalizeMapHeight('x')).toBeNull();
+  });
+  it('knows when the map fits', () => {
+    expect(mapFits(GRID_MIN_HEIGHT + MAP_MIN_HEIGHT)).toBe(true);
+    expect(mapFits(GRID_MIN_HEIGHT + MAP_MIN_HEIGHT - 1)).toBe(false);
   });
 });
 

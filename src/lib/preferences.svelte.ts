@@ -1,6 +1,6 @@
 import { bestTextOn, normalizeHex } from './colors';
 import { defaultLayout, normalizeLayout, type ColumnLayout } from './columnLayout';
-import { normalizePreviewWidth } from './paneSplit';
+import { normalizeMapHeight, normalizePreviewWidth } from './paneSplit';
 import { DEFAULT_CRITERIA, normalizeCriteria, type Criteria } from './criteria';
 import { DEFAULT_EDITOR, normalizeEditor, type EditorSettings } from './editors';
 import { parseRoots } from './request';
@@ -26,6 +26,11 @@ interface Stored {
   /** The preview's width in pixels, or null until the user drags the splitter (then a share of the window applies). */
   previewWidth: number | null;
   previewCollapsed: boolean;
+  mapCollapsed: boolean;
+  /** The results map's height in pixels, or null until the user drags its splitter (then a default applies). */
+  mapHeight: number | null;
+  mapMetric: 'size' | 'matches';
+  mapColor: 'type' | 'age';
 }
 
 /** A stored highlight color is used only if it is a real hex color. */
@@ -49,6 +54,10 @@ function load(): Stored {
     highlightColor: null,
     previewWidth: null,
     previewCollapsed: false,
+    mapCollapsed: false,
+    mapHeight: null,
+    mapMetric: 'size',
+    mapColor: 'type',
   };
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
@@ -68,6 +77,10 @@ function load(): Stored {
       highlightColor: validHighlight(raw.highlightColor),
       previewWidth: normalizePreviewWidth(raw.previewWidth),
       previewCollapsed: raw.previewCollapsed === true,
+      mapCollapsed: raw.mapCollapsed === true,
+      mapHeight: normalizeMapHeight(raw.mapHeight),
+      mapMetric: raw.mapMetric === 'matches' ? 'matches' : 'size',
+      mapColor: raw.mapColor === 'age' ? 'age' : 'type',
     };
   } catch {
     // Storage can be unavailable or corrupt. Start from defaults.
@@ -88,6 +101,10 @@ export class Preferences {
   highlightColor = $state<string | null>(null);
   previewWidth = $state<number | null>(null);
   previewCollapsed = $state(false);
+  mapCollapsed = $state(false);
+  mapHeight = $state<number | null>(null);
+  mapMetric = $state<'size' | 'matches'>('size');
+  mapColor = $state<'type' | 'age'>('type');
 
   constructor() {
     Object.assign(this, load());
@@ -138,6 +155,10 @@ export class Preferences {
       highlightColor: this.highlightColor,
       previewWidth: this.previewWidth,
       previewCollapsed: this.previewCollapsed,
+      mapCollapsed: this.mapCollapsed,
+      mapHeight: this.mapHeight,
+      mapMetric: this.mapMetric,
+      mapColor: this.mapColor,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
