@@ -119,7 +119,7 @@
   /* The results map. Its canvas draws in system colors itself, so these cover the controls around it. */
   .modes button:disabled,
   .tool:disabled,
-  .map-toggle:disabled {
+  .map-toggle[aria-disabled='true'] {
     color: GrayText !important;
     border-color: GrayText !important;
   }

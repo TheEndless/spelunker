@@ -36,6 +36,8 @@
     onToggleMap,
   }: Props = $props();
 
+  const TOO_SHORT_REASON = 'The window is too short for the map';
+
   let errorsOpen = $state(false);
 
   const phase = $derived(statusPhase({ running, stopping, summary }));
@@ -82,17 +84,23 @@
     {/if}
   </span>
   {#if onToggleMap}
+    <!-- Unavailable rather than disabled while the window is too short: a disabled button cannot be
+         focused, so the reason would never be read out. It is not pressed then, since no map shows. -->
     <button
       type="button"
       class="map-toggle"
-      aria-pressed={mapOn}
-      disabled={mapTooShort}
-      title={mapTooShort ? 'The window is too short for the map' : withShortcut('Show or hide the results map', 'Ctrl+Shift+M')}
-      onclick={onToggleMap}
+      aria-pressed={mapOn && !mapTooShort}
+      aria-disabled={mapTooShort ? 'true' : undefined}
+      aria-describedby={mapTooShort ? 'map-toggle-reason' : undefined}
+      title={mapTooShort ? TOO_SHORT_REASON : withShortcut('Show or hide the results map', 'Ctrl+Shift+M')}
+      onclick={() => {
+        if (!mapTooShort) onToggleMap();
+      }}
     >
       <Icon name="map" size={14} />
       Map
     </button>
+    {#if mapTooShort}<span class="sr-only" id="map-toggle-reason">{TOO_SHORT_REASON}</span>{/if}
   {/if}
 </footer>
 
@@ -159,7 +167,7 @@
     color: var(--text-muted);
     font: inherit;
   }
-  .map-toggle:hover:not(:disabled) {
+  .map-toggle:hover:not([aria-disabled='true']) {
     border-color: var(--border-strong);
     color: var(--text);
   }
@@ -168,7 +176,7 @@
     background: var(--surface);
     color: var(--text);
   }
-  .map-toggle:disabled {
+  .map-toggle[aria-disabled='true'] {
     color: var(--disabled-text);
     cursor: not-allowed;
   }
