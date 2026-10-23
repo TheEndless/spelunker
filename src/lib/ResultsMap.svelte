@@ -27,7 +27,7 @@
   import { forcedMapColors, mapColors } from './treemapColors';
   import type { Direction } from './treemapIndex';
   import { RectKind, type Layout, type Metric } from './treemapLayout';
-  import { paintLayout, type ColorMode } from './treemapPaint';
+  import { paintLayout, snapToDevicePixel, type ColorMode } from './treemapPaint';
   import type { DisplayRow } from './types';
 
   interface Props {
@@ -217,7 +217,7 @@
     const context = baseCanvas.getContext('2d');
     if (!context) return;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    const style = { colors, colorMode, forced, font, labelColorFor: bestTextOn };
+    const style = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio };
     const dimmed = shownBuckets.size > 0 ? shownBuckets : null;
     paintLayout(context, current, width, height, style, dimmed, (rect) => session.rowById(current.id[rect])?.name ?? '');
   });
@@ -378,19 +378,24 @@
 
   // ---- overlay
 
+  /** A rectangle's edges on whole device pixels, matching the painted fill, so outlines are crisp. */
+  function snappedBox(x: number, y: number, w: number, h: number, ratio: number) {
+    const left = snapToDevicePixel(x, ratio);
+    const top = snapToDevicePixel(y, ratio);
+    return { x: left, y: top, w: snapToDevicePixel(x + w, ratio) - left, h: snapToDevicePixel(y + h, ratio) - top };
+  }
+
   function strokeTwoTone(
     context: CanvasRenderingContext2D,
     current: Layout,
     rect: number,
+    ratio: number,
     lightWidth: number,
     darkWidth: number,
     light: string,
     dark: string,
   ) {
-    let x = current.x[rect];
-    let y = current.y[rect];
-    let w = current.w[rect];
-    let h = current.h[rect];
+    let { x, y, w, h } = snappedBox(current.x[rect], current.y[rect], current.w[rect], current.h[rect], ratio);
     const total = lightWidth + darkWidth;
     // Too small to hold the outline inside, so it goes around the rectangle instead.
     if (w < 2 * total + 2 || h < 2 * total + 2) {
@@ -409,14 +414,15 @@
   }
 
   /** The hovered rectangle's folder, as a dashed line alternating the two outline colors. */
-  function strokeParentFrame(context: CanvasRenderingContext2D, current: Layout, rect: number, light: string, dark: string) {
+  function strokeParentFrame(context: CanvasRenderingContext2D, current: Layout, rect: number, ratio: number, light: string, dark: string) {
     const folderId = current.folderId[rect];
     for (let frame = 0; frame < current.frameCount; frame++) {
       if (current.frameFolderId[frame] !== folderId) continue;
-      const x = current.frameX[frame] + 0.5;
-      const y = current.frameY[frame] + 0.5;
-      const w = current.frameW[frame] - 1;
-      const h = current.frameH[frame] - 1;
+      const box = snappedBox(current.frameX[frame], current.frameY[frame], current.frameW[frame], current.frameH[frame], ratio);
+      const x = box.x + 0.5;
+      const y = box.y + 0.5;
+      const w = box.w - 1;
+      const h = box.h - 1;
       context.lineWidth = 1;
       context.setLineDash(FRAME_DASH);
       context.strokeStyle = light;
@@ -446,11 +452,11 @@
     context.clearRect(0, 0, width, height);
     if (!current) return;
     if (hover >= 0 && hover < current.count) {
-      strokeParentFrame(context, current, hover, light, dark);
-      if (hover !== selected) strokeTwoTone(context, current, hover, HOVER_LIGHT_WIDTH, HOVER_DARK_WIDTH, light, dark);
+      strokeParentFrame(context, current, hover, ratio, light, dark);
+      if (hover !== selected) strokeTwoTone(context, current, hover, ratio, HOVER_LIGHT_WIDTH, HOVER_DARK_WIDTH, light, dark);
     }
     if (selected >= 0 && selected < current.count) {
-      strokeTwoTone(context, current, selected, SELECTED_LIGHT_WIDTH, SELECTED_DARK_WIDTH, light, dark);
+      strokeTwoTone(context, current, selected, ratio, SELECTED_LIGHT_WIDTH, SELECTED_DARK_WIDTH, light, dark);
     }
   });
 

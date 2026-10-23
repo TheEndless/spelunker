@@ -25,6 +25,7 @@ const style = (overrides: Partial<PaintStyle> = {}): PaintStyle => ({
   forced: null,
   font: '12px sans-serif',
   labelColorFor: bestTextOn,
+  pixelRatio: 1,
   ...overrides,
 });
 
@@ -34,6 +35,16 @@ function sampleLayout() {
   tree.add({ id: 2, folder: 'C:\\a', name: 'b.png', size: 200, hits: 0, modifiedMs: null });
   return layoutTree(tree.root, { files: 2, folders: tree.folderCount }, {
     width: 400, height: 200, metric: 'size', now: 0, minLeafArea: 0, minFolderSide: 0, inset: 0, insetMinSide: Infinity,
+  });
+}
+
+/** Uneven sizes in an odd-sized area, so the squarified rectangles start and end between pixels. */
+function fractionalLayout() {
+  const tree = new FolderTree();
+  const sizes = [977, 613, 401, 389, 251, 173, 97, 61, 37, 23, 11, 7];
+  sizes.forEach((size, index) => tree.add({ id: index + 1, folder: 'C:\\a', name: `f${index}.rs`, size, hits: 0, modifiedMs: null }));
+  return layoutTree(tree.root, { files: sizes.length, folders: tree.folderCount }, {
+    width: 333, height: 177, metric: 'size', now: 0, minLeafArea: 0, minFolderSide: 0, inset: 0, insetMinSide: Infinity,
   });
 }
 
@@ -63,6 +74,37 @@ describe('paintLayout', () => {
     const layout = sampleLayout();
     paintLayout(context, layout, 400, 200, style(), null, (rect) => `name${rect}`);
     expect(calls.filter((call) => call.name === 'fillText').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('puts every fill edge on a whole device pixel, so no rectangle has a soft edge', () => {
+    for (const pixelRatio of [1, 1.25, 1.5, 2]) {
+      const { context, calls } = fakeContext();
+      const layout = fractionalLayout();
+      paintLayout(context, layout, 333, 177, style({ pixelRatio }), null, null);
+      const fills = calls.filter((call) => call.name === 'fillRect').slice(1);
+      expect(fills).toHaveLength(layout.count);
+      for (const { args } of fills) {
+        const [x, y, w, h] = args as number[];
+        for (const edge of [x, y, x + w, y + h]) expect(edge * pixelRatio).toBeCloseTo(Math.round(edge * pixelRatio), 6);
+      }
+    }
+  });
+
+  it('keeps a seam between neighbours without letting any rectangle vanish', () => {
+    const { context, calls } = fakeContext();
+    const layout = fractionalLayout();
+    paintLayout(context, layout, 333, 177, style({ pixelRatio: 1 }), null, null);
+    const fills = calls.filter((call) => call.name === 'fillRect').slice(1).map((call) => call.args as number[]);
+    for (const [, , w, h] of fills) expect(w > 0 && h > 0).toBe(true);
+    // No two fills overlap: the seam is taken from inside each rectangle.
+    for (let i = 0; i < fills.length; i++) {
+      for (let j = i + 1; j < fills.length; j++) {
+        const [ax, ay, aw, ah] = fills[i];
+        const [bx, by, bw, bh] = fills[j];
+        const overlaps = ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+        expect(overlaps).toBe(false);
+      }
+    }
   });
 
   it('draws only outlines in forced-colors mode', () => {

@@ -11,6 +11,16 @@ export interface PaintStyle {
   forced: ForcedColors | null;
   font: string;
   labelColorFor: (fill: string) => string;
+  /** Device pixels per CSS pixel, so edges can be put on whole device pixels. */
+  pixelRatio: number;
+}
+
+/**
+ * The nearest whole device pixel, in CSS pixels. Layout positions are fractional, and an edge
+ * between two device pixels is drawn as a blend of both colors, which looks soft.
+ */
+export function snapToDevicePixel(value: number, pixelRatio: number): number {
+  return Math.round(value * pixelRatio) / pixelRatio;
 }
 
 const MIN_LABEL_WIDTH = 64;
@@ -51,7 +61,10 @@ export function paintLayout(
   dimmed: ReadonlySet<number> | null,
   nameOf: ((rect: number) => string) | null,
 ): void {
-  const { colors, colorMode, forced } = style;
+  const { colors, colorMode, forced, pixelRatio } = style;
+  const devicePixel = 1 / pixelRatio;
+  // About one CSS pixel between neighbours, in whole device pixels.
+  const seam = Math.max(1, Math.round(pixelRatio)) / pixelRatio;
   context.globalAlpha = 1;
   context.fillStyle = forced ? forced.canvas : colors.background;
   context.fillRect(0, 0, width, height);
@@ -61,11 +74,13 @@ export function paintLayout(
   const measure = (text: string) => context.measureText(text).width;
 
   for (let i = 0; i < layout.count; i++) {
-    const rectX = layout.x[i];
-    const rectY = layout.y[i];
-    const rectWidth = layout.w[i];
-    const rectHeight = layout.h[i];
-    if (rectWidth < 0.5 || rectHeight < 0.5) continue;
+    if (layout.w[i] < 0.5 || layout.h[i] < 0.5) continue;
+    // Both edges are snapped, so a shared edge lands on the same pixel for both neighbours. A
+    // rectangle never shrinks to nothing: it keeps at least one device pixel.
+    const rectX = snapToDevicePixel(layout.x[i], pixelRatio);
+    const rectY = snapToDevicePixel(layout.y[i], pixelRatio);
+    const rectWidth = Math.max(snapToDevicePixel(layout.x[i] + layout.w[i], pixelRatio) - rectX, devicePixel);
+    const rectHeight = Math.max(snapToDevicePixel(layout.y[i] + layout.h[i], pixelRatio) - rectY, devicePixel);
 
     if (forced) {
       if (rectWidth >= 3 && rectHeight >= 3) {
@@ -81,9 +96,9 @@ export function paintLayout(
     const isDimmed = dimmed !== null && !dimmed.has(bucket);
     context.globalAlpha = isDimmed ? DIMMED_ALPHA : 1;
     context.fillStyle = fill;
-    // A half-pixel seam on each side keeps neighbouring files apart without drawing outlines.
-    const seam = rectWidth >= 2 && rectHeight >= 2 ? 0.5 : 0;
-    context.fillRect(rectX + seam, rectY + seam, rectWidth - 2 * seam, rectHeight - 2 * seam);
+    // A seam on the right and bottom keeps neighbouring files apart without drawing outlines.
+    const gap = rectWidth >= 2 && rectHeight >= 2 ? seam : 0;
+    context.fillRect(rectX, rectY, rectWidth - gap, rectHeight - gap);
 
     if (
       nameOf &&

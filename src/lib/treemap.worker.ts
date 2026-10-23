@@ -97,7 +97,10 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
     offscreen.width = Math.round(view.width * view.devicePixelRatio);
     offscreen.height = Math.round(view.height * view.devicePixelRatio);
     context.setTransform(view.devicePixelRatio, 0, 0, view.devicePixelRatio, 0, 0);
-    const style: PaintStyle = { colors: view.colors, colorMode: view.colorMode, forced: view.forced, font: view.font, labelColorFor: bestTextOn };
+    const style: PaintStyle = {
+      colors: view.colors, colorMode: view.colorMode, forced: view.forced, font: view.font, labelColorFor: bestTextOn,
+      pixelRatio: view.devicePixelRatio,
+    };
     paintLayout(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null, (rect) => nameOfRect(full, rect));
     painted = true;
     paintMs = performance.now() - paintStarted;
