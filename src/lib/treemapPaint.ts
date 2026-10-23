@@ -1,3 +1,6 @@
+// The worker paints with this module too. textFit only touches the document in canvasMeasurer,
+// which is not used here, so it is safe to load in a worker.
+import { fitMiddle } from './textFit';
 import type { ForcedColors, MapColors } from './treemapColors';
 import { RectKind, type Layout } from './treemapLayout';
 
@@ -26,31 +29,6 @@ export function snapToDevicePixel(value: number, pixelRatio: number): number {
 const MIN_LABEL_WIDTH = 64;
 const MIN_LABEL_HEIGHT = 16;
 const DIMMED_ALPHA = 0.18;
-
-/**
- * Shortens a label to fit `maxWidth`, cutting from the middle so the extension stays visible.
- * Three plain dots stand in for the cut. Returns an empty string when not even the dots fit.
- */
-export function fittedLabel(measure: (text: string) => number, text: string, maxWidth: number): string {
-  if (measure(text) <= maxWidth) return text;
-  const dots = '...';
-  let low = 0;
-  let high = text.length;
-  let best = '';
-  while (low <= high) {
-    const keep = Math.floor((low + high) / 2);
-    const tail = Math.ceil(keep / 2);
-    const head = keep - tail;
-    const candidate = `${text.slice(0, head)}${dots}${text.slice(text.length - tail)}`;
-    if (measure(candidate) <= maxWidth) {
-      best = candidate;
-      low = keep + 1;
-    } else {
-      high = keep - 1;
-    }
-  }
-  return best;
-}
 
 export function paintLayout(
   context: Context2D,
@@ -107,7 +85,8 @@ export function paintLayout(
       rectWidth >= MIN_LABEL_WIDTH &&
       rectHeight >= MIN_LABEL_HEIGHT
     ) {
-      const label = fittedLabel(measure, nameOf(i), rectWidth - 8);
+      // The list's own middle cut, which keeps the extension and never splits a character.
+      const label = fitMiddle(nameOf(i), rectWidth - 8, measure);
       if (label !== '') {
         context.fillStyle = style.labelColorFor(fill);
         context.fillText(label, rectX + 4, rectY + 9);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { bestTextOn } from './colors';
-import { fittedLabel, paintLayout, type Context2D, type PaintStyle } from './treemapPaint';
+import { paintLayout, type Context2D, type PaintStyle } from './treemapPaint';
 import { layoutTree } from './treemapLayout';
 import { FolderTree } from './treemapTree';
 import { mapColors } from './treemapColors';
@@ -133,24 +133,39 @@ describe('paintLayout', () => {
   });
 });
 
-describe('fittedLabel', () => {
+describe('labels', () => {
+  /** The label drawn on the first rectangle when it is `width` wide, or null when none is drawn. */
+  function labelAtWidth(name: string, width: number): string | null {
+    const { context, calls } = fakeContext();
+    const layout = sampleLayout();
+    layout.w[0] = width;
+    paintLayout(context, layout, 400, 200, style(), null, (rect) => (rect === 0 ? name : ''));
+    const text = calls.find((call) => call.name === 'fillText' && call.args[0] !== '');
+    return text ? (text.args[0] as string) : null;
+  }
   const measure = (text: string) => text.length * 6;
-  it('keeps a label that fits', () => expect(fittedLabel(measure, 'abc.txt', 100)).toBe('abc.txt'));
-  it('shortens with three dots in the middle of a long name and keeps the extension end', () => {
-    const result = fittedLabel(measure, 'a-very-long-file-name.txt', 90);
-    expect(result).toContain('...');
-    expect(result.endsWith('.txt')).toBe(true);
-    expect(measure(result)).toBeLessThanOrEqual(90);
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+  it('keeps a name that fits', () => expect(labelAtWidth('abc.txt', 200)).toBe('abc.txt'));
+
+  it('shortens a long name in the middle so it fits, keeping the end with the extension', () => {
+    const name = 'a-very-long-file-name-that-goes-on-and-on.txt';
+    for (let width = 64; width <= 300; width++) {
+      const label = labelAtWidth(name, width);
+      expect(label).not.toBeNull();
+      expect(measure(label!)).toBeLessThanOrEqual(width - 8);
+      if (label !== name) {
+        expect(label).toContain('…');
+        expect(label!.endsWith('.txt')).toBe(true);
+      }
+    }
   });
-  it('returns an empty string when nothing fits', () => expect(fittedLabel(measure, 'abcdef', 6)).toBe(''));
-  it('returns an empty string when even the three dots do not fit', () => {
-    expect(fittedLabel(measure, 'abcdef', 17)).toBe('');
-  });
-  it('returns just the dots when exactly they fit', () => expect(fittedLabel(measure, 'abcdef', 18)).toBe('...'));
-  it('always measures within the width for every width', () => {
-    const text = 'a-very-long-file-name.txt';
-    for (let maxWidth = 0; maxWidth <= 160; maxWidth++) {
-      expect(measure(fittedLabel(measure, text, maxWidth))).toBeLessThanOrEqual(maxWidth);
+
+  it('never cuts a name inside a surrogate pair', () => {
+    const name = `${'\u{1F600}'.repeat(30)}-notes-${'\u{1F4C1}'.repeat(30)}.txt`;
+    for (let width = 64; width <= 400; width++) {
+      const label = labelAtWidth(name, width);
+      if (label !== null) expect(label).not.toMatch(LONE_SURROGATE);
     }
   });
 });
