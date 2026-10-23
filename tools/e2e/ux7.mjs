@@ -496,13 +496,9 @@ async function performanceChecks() {
 async function realChecks() {
   await send('Runtime.enable');
   // Start from a first-run window: an earlier suite can leave a Name pattern or a filter behind in
-  // the same page, which would make this search find nothing.
-  await ev(`localStorage.removeItem('spelunker.preferences.v1')`);
-  await send('Page.reload');
-  for (let attempt = 0; attempt < 60 && !(await ev(`!!document.querySelector('[role=search]')`)); attempt++) await sleep(500);
-  await sleep(500);
-  await ev(PAGE_HELPERS);
-  await ev(MAP_HELPERS);
+  // the same page, which would make this search find nothing. Clearing the preferences and then
+  // reloading is not enough, since the page saves a pending change as it unloads.
+  await loadFresh('light');
   const folder = 'D:\\Development\\ai\\spelunker\\src';
   await search('export', folder);
   const mapped = await state();
