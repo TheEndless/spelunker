@@ -16,6 +16,7 @@ mod store;
 mod type_name;
 
 use tauri::{Emitter, Manager};
+use tauri_plugin_window_state::StateFlags;
 
 /// The folders named by command-line arguments, as Explorer passes them from the folder menu.
 /// A relative argument (a terminal launch such as `spelunker .`) is taken from `working_folder`,
@@ -59,16 +60,39 @@ fn ensure_explorer_entry(app: &tauri::AppHandle) {
     }
 }
 
+/// The environment variable that keeps a debug build from bringing its window forward, so the
+/// end-to-end scripts never take focus from the person using the machine (see tools/e2e/README.md).
+const NO_FOCUS_VARIABLE: &str = "SPELUNKER_NO_FOCUS";
+
+/// Whether the app may bring its window forward: when the window first appears, on a second
+/// launch, and when the window state plugin shows the restored window. Only a debug build listens
+/// to the variable, so a release build always does, whatever the environment says.
+fn should_take_focus(debug_build: bool, no_focus_value: Option<&str>) -> bool {
+    !debug_build || no_focus_value != Some("1")
+}
+
 fn main() {
     let launch_arguments: Vec<String> = std::env::args().skip(1).collect();
+    let take_focus = should_take_focus(
+        cfg!(debug_assertions),
+        std::env::var(NO_FOCUS_VARIABLE).ok().as_deref(),
+    );
+    // Restoring the saved "visible" state shows the window and then focuses it, so a run that must
+    // not take focus leaves that one part of the state alone.
+    let mut window_state = tauri_plugin_window_state::Builder::default();
+    if !take_focus {
+        window_state = window_state.with_state_flags(StateFlags::all() - StateFlags::VISIBLE);
+    }
 
     tauri::Builder::default()
         // A second launch (for example from Explorer's menu) hands its folder to the running window.
         .plugin(tauri_plugin_single_instance::init(
-            |app, arguments, working_folder| {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
+            move |app, arguments, working_folder| {
+                if take_focus {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                    }
                 }
                 // This runs inside the other launch's message call, so the disk checks for the
                 // folder go to another thread instead of holding that launch (and this one) up.
@@ -82,7 +106,7 @@ fn main() {
                 });
             },
         ))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(window_state.build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(commands::ActiveSearch::default())
@@ -98,13 +122,15 @@ fn main() {
             ensure_explorer_entry(app.handle());
 
             // The window is made here, not from the config alone, so it can refuse to leave the app's own pages.
-            let window_config = app
+            let mut window_config = app
                 .config()
                 .app
                 .windows
                 .first()
                 .cloned()
                 .expect("tauri.conf.json defines the main window");
+            // A run that must not take focus shows the window without activating it.
+            window_config.focus &= take_focus;
             tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
                 .on_navigation(|url| navigation::is_app_page(url, cfg!(debug_assertions)))
                 .build()?;
@@ -174,6 +200,21 @@ mod tests {
         // Windows paths are case-insensitive, and the argument is used as it was typed.
         let expected = folder.to_string_lossy().to_lowercase();
         assert_eq!(found.map(|path| path.to_lowercase()), Some(expected));
+    }
+
+    #[test]
+    fn a_release_build_always_takes_focus_whatever_the_variable_says() {
+        for value in [None, Some("1"), Some("0"), Some(""), Some("yes")] {
+            assert!(should_take_focus(false, value), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_debug_build_takes_focus_unless_the_variable_is_1() {
+        assert!(should_take_focus(true, None));
+        assert!(should_take_focus(true, Some("0")));
+        assert!(should_take_focus(true, Some("")));
+        assert!(!should_take_focus(true, Some("1")));
     }
 
     #[test]
