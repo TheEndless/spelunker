@@ -20,7 +20,9 @@ Every suite prints PASS or FAIL per check and exits with code 1 when any check f
 
 ## Suites
 
-The routine run is every row of this table. `shellmenu4.mjs` is not part of it (see the warnings).
+The routine run is every row of this table except `shellmenu4.mjs`, plus `installtest.ps1` after a
+release build. `shellmenu4.mjs`, `release-check.ps1` and `installrun.ps1` take the foreground and are
+for when nobody is using the machine (see the warnings).
 
 | Script | What it checks |
 | --- | --- |
@@ -49,10 +51,14 @@ The routine run is every row of this table. `shellmenu4.mjs` is not part of it (
 - `launch.ps1` also sets `SPELUNKER_NO_FOCUS=1`. A debug build that sees it never brings its window
   forward: not when the window first appears, not on a second launch (which normally restores and
   focuses the running window), and not when the window state plugin restores a saved window. A
-  release build ignores the variable, so the product always behaves the same for its users. The
-  release exe asks for activation when its window first appears, and Windows refuses that to a
-  program that the person did not start, so `release-check.ps1` and `installrun.ps1` rely on that
-  and on the off-screen start.
+  release build ignores the variable, so the product always behaves the same for its users.
+- **`release-check.ps1` and `installrun.ps1` take the foreground: run them only when nobody is using
+  the machine.** They start a release exe, and once a window state has been saved
+  (`%APPDATA%\dev.skean.spelunker\.window-state.json`, written whenever the app is closed
+  normally) the release exe restores its window and focuses it itself, the Tauri way, which injects
+  an Alt key press to win the foreground. The quiet start cannot prevent that, and the release
+  behavior is the product's, so it is not changed for the tests. `installtest.ps1` starts no app
+  (silent install and uninstall only) and takes no focus.
 - The window never has the real focus, so `openPage` (and `ux.mjs`) turn on the protocol's focus
   emulation: the page behaves as a focused one, with focus events and `:focus-visible`.
 - To prove a run took no focus, run `foreground.ps1` (read-only) before and after it, or

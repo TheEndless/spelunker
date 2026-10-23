@@ -8,7 +8,8 @@ $profile = Join-Path $PSScriptRoot '.release-profile'
 if (Test-Path $profile) { Remove-Item -Recurse -Force $profile }
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
 $env:WEBVIEW2_USER_DATA_FOLDER = $profile
-# Started without activation and moved off screen. The release exe ignores SPELUNKER_NO_FOCUS by design.
+# Started without activation and moved off screen, but the release exe ignores SPELUNKER_NO_FOCUS by
+# design and focuses a restored window itself, so this takes the foreground (see README.md).
 $process = & (Join-Path $PSScriptRoot 'start-quiet.ps1') $exe -OffScreenWindowClass 'Tauri Window'
 Start-Sleep -Seconds 6
 "started $exe (pid $($process.Id))"
