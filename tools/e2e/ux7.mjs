@@ -11,8 +11,8 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PAGE_HELPERS } from './cdp.mjs';
-import { launchHeadlessEdge } from './headless.mjs';
-import { createChecker, openPage } from './page.mjs';
+import { drawFrame, launchHeadlessEdge, resizeTo as resizeHeadless, settleFrames } from './headless.mjs';
+import { createChecker, openPage, sleep } from './page.mjs';
 
 const real = process.argv.includes('--real');
 const shotsIndex = process.argv.indexOf('--shots');
@@ -37,25 +37,11 @@ const onEvent = (event) => {
   }
 };
 
-const edge = real ? null : await launchHeadlessEdge({ port: HEADLESS_PORT, name: 'ux7' });
-const page = await openPage(real ? { onEvent } : { webSocketDebuggerUrl: edge.webSocketDebuggerUrl, onEvent });
-const { send, sleep, ev, key, mouse, setField } = page;
+// The page's protocol calls, filled in once the page is open (inside the try at the end).
+let send, ev, key, mouse, setField;
 
-/**
- * Headless Edge runs the rendering steps (where size observers fire and the worker's canvas reaches
- * the page) only when a frame is drawn, so one is asked for, as a real window draws them on its own.
- */
-const frame = async () => {
-  await send('Page.captureScreenshot', { format: 'jpeg', quality: 10 });
-  await sleep(120);
-};
-const settle = async (milliseconds) => {
-  const until = Date.now() + milliseconds;
-  while (Date.now() < until) {
-    await frame();
-    await sleep(200);
-  }
-};
+const frame = () => drawFrame(send);
+const settle = (milliseconds) => settleFrames(send, milliseconds);
 const shot = async (name) => {
   if (!shotsFolder) return;
   await frame();
@@ -63,10 +49,7 @@ const shot = async (name) => {
   writeFileSync(join(shotsFolder, `${name}.png`), Buffer.from(reply.result.data, 'base64'));
   console.log(`      saved ${name}.png`);
 };
-const resizeTo = async (width, height) => {
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  await settle(900);
-};
+const resizeTo = (width, height) => resizeHeadless(send, width, height);
 const click = async (x, y, modifiers = 0) => {
   await mouse('mouseMoved', x, y, { modifiers });
   await mouse('mousePressed', x, y, { modifiers });
@@ -212,13 +195,11 @@ async function radio(group, label) {
 }
 
 const radioState = (group, label) =>
-  ev(`(() => { const button = [...document.querySelectorAll('.map [role=radiogroup][aria-label=${group}] button')].find((b) => b.textContent.trim() === ${JSON.stringify(label)}); return { checked: button.getAttribute('aria-checked') === 'true', disabled: button.disabled }; })()`);
+  ev(`(() => { const button = [...document.querySelectorAll('.map [role=radiogroup][aria-label=${group}] button')].find((candidate) => candidate.textContent.trim() === ${JSON.stringify(label)}); return { checked: button.getAttribute('aria-checked') === 'true', disabled: button.disabled }; })()`);
 
 async function browserChecks() {
   await send('Runtime.enable');
   await send('Page.enable');
-  // Headless pages never have focus on their own, so focus events and :focus-visible would not happen.
-  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
   await resizeTo(1280, 800);
   await loadFresh('light');
 
@@ -238,7 +219,7 @@ async function browserChecks() {
   const byMatches = await state();
   const matchesSample = await sampleBase();
   check('3. switching to Matches changes the summary', byMatches.summary !== first.summary && /match/.test(byMatches.summary ?? ''), { before: first.summary, after: byMatches.summary });
-  check('3. and the picture', matchesSample.signature !== firstSample.signature);
+  check('3. and the picture (both samples drawn)', firstSample?.opaque === 200 && matchesSample?.opaque === 200 && matchesSample.signature !== firstSample.signature, { before: firstSample?.opaque, after: matchesSample?.opaque });
   await radio('Area', 'Size');
 
   // ---- 4. File type to Age changes the colors and the legend
@@ -247,7 +228,7 @@ async function browserChecks() {
   await radio('Color', 'Age');
   const ageSample = await sampleBase();
   const ageLegend = (await state()).legend;
-  check('4. switching to Age changes the picture', ageSample.signature !== typeSample.signature);
+  check('4. switching to Age changes the picture (both samples drawn)', typeSample?.opaque === 200 && ageSample?.opaque === 200 && ageSample.signature !== typeSample.signature, { before: typeSample?.opaque, after: ageSample?.opaque });
   check('4. the legend lists age buckets after the switch', ageLegend.length >= 2 && ageLegend.every((label) => AGE_LABELS.includes(label)), { typeLegend, ageLegend });
   await radio('Color', 'File type');
 
@@ -490,7 +471,7 @@ async function performanceChecks() {
   check(`16. worker layout of 100,000 files under ${BUDGET.layoutMs} ms`, settled.layout < BUDGET.layoutMs, round(settled.layout));
   check(`16. worker paint under ${BUDGET.paintMs} ms`, settled.paint < BUDGET.paintMs, round(settled.paint));
   check(`16. hit index build under ${BUDGET.indexMs} ms`, settled.index < BUDGET.indexMs, round(settled.index));
-  check(`16. hover under ${BUDGET.hoverMs} ms per move`, hover.mean < BUDGET.hoverMs, hover);
+  check(`16. hover under ${BUDGET.hoverMs} ms per move (95th percentile)`, hover.p95 < BUDGET.hoverMs, hover);
   check(`16. the map adds no long task over ${BUDGET.longTaskMs} ms`, mapOnlyLongest <= 0, { withMap: withMap.tasks, withoutMap: withoutMap.tasks });
   check(`16. the map adds under ${BUDGET.extraLongTaskTotalMs} ms of long-task time`, extraTotal < BUDGET.extraLongTaskTotalMs, { withMap: withMap.total, withoutMap: withoutMap.total });
 
@@ -514,12 +495,19 @@ async function performanceChecks() {
 /** Check 17: the real backend, in the running debug exe. */
 async function realChecks() {
   await send('Runtime.enable');
+  // Start from a first-run window: an earlier suite can leave a Name pattern or a filter behind in
+  // the same page, which would make this search find nothing.
+  await ev(`localStorage.removeItem('spelunker.preferences.v1')`);
+  await send('Page.reload');
+  for (let attempt = 0; attempt < 60 && !(await ev(`!!document.querySelector('[role=search]')`)); attempt++) await sleep(500);
+  await sleep(500);
   await ev(PAGE_HELPERS);
   await ev(MAP_HELPERS);
   const folder = 'D:\\Development\\ai\\spelunker\\src';
   await search('export', folder);
   const mapped = await state();
-  check('17. a real folder search draws the map', mapped.shown && (await sampleBase())?.opaque === 200, mapped.summary);
+  const mappedSample = await sampleBase();
+  check('17. a real folder search draws the map of its files', mapped.shown && /^\d[\d,]* files?\b/.test(mapped.summary ?? '') && mappedSample?.opaque === 200, { summary: mapped.summary, opaque: mappedSample?.opaque });
   const [target] = await ev('window.__ux7.largestFiles(1)');
   await mouse('mouseMoved', target.x, target.y);
   await sleep(300);
@@ -530,7 +518,13 @@ async function realChecks() {
   check('17. clicking it selects the same file in the list', (await state()).selectedName === tooltip?.title, { tooltip: tooltip?.title, selected: (await state()).selectedName });
 }
 
+let edge = null;
+let page = null;
 try {
+  // Both inside the try, so a browser that starts but cannot be reached is still stopped.
+  edge = real ? null : await launchHeadlessEdge({ port: HEADLESS_PORT, name: 'ux7' });
+  page = await openPage(real ? { onEvent } : { webSocketDebuggerUrl: edge.webSocketDebuggerUrl, onEvent });
+  ({ send, ev, key, mouse, setField } = page);
   if (real) {
     for (let number = 1; number <= 16; number++) skip(`${number}.`, 'runs in headless Edge: node ux7.mjs');
     await realChecks();
@@ -539,8 +533,8 @@ try {
     skip('17. a real folder search through the actual backend', 'needs the debug exe: start it with launch.ps1, then node ux7.mjs --real');
   }
 } finally {
-  console.log(problems.length === 0 ? '\nno console errors, warnings, or exceptions' : `\nconsole problems:\n${problems.join('\n')}`);
+  check('no console errors, warnings, or exceptions', problems.length === 0, problems);
   summarize();
-  page.close();
+  page?.close();
   await edge?.stop();
 }

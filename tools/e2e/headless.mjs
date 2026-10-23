@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sleep } from './page.mjs';
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 
@@ -21,7 +22,30 @@ const QUIET_FLAGS = [
   '--disable-features=msImplicitSignin,msEdgeSync,EdgeSync',
 ];
 
-const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+/**
+ * Headless Edge runs the rendering steps (where resize events and size observers fire, and a
+ * worker's canvas reaches the page) only when a frame is drawn, so one is asked for, as a real
+ * window draws them on its own. `send` is the page's protocol call from `openPage`.
+ */
+export async function drawFrame(send) {
+  await send('Page.captureScreenshot', { format: 'jpeg', quality: 10 });
+  await sleep(120);
+}
+
+/** Keeps drawing frames for about the given time, so the page settles as a real window would. */
+export async function settleFrames(send, milliseconds) {
+  const until = Date.now() + milliseconds;
+  while (Date.now() < until) {
+    await drawFrame(send);
+    await sleep(200);
+  }
+}
+
+/** Gives the headless page a new viewport size and lets it settle. */
+export async function resizeTo(send, width, height) {
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await settleFrames(send, 900);
+}
 
 /**
  * Starts headless Edge with its own throwaway profile and waits for its blank page. Returns that

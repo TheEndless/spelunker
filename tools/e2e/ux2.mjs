@@ -47,7 +47,8 @@ check('baseline search finishes', /matches in \d+ files?|files? matched/.test(fi
 await ev(`document.querySelector('.head button').focus()`);
 await key('F6');
 const afterHeaderF6 = await ev(active);
-check('F6 from a column heading moves on to the preview', afterHeaderF6?.pane === 'preview', afterHeaderF6);
+// The heading is part of the results pane, so F6 moves on to the next pane, the map below the list.
+check('F6 from a column heading moves on to the next pane (the results map)', afterHeaderF6?.pane === 'map', afterHeaderF6);
 await ev(`document.querySelector('.head button').focus()`);
 await key('F1');
 const popoverOpen = await ev(`!!document.querySelector('[role=dialog][aria-label="Keyboard shortcuts"]')`);

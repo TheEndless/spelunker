@@ -6,6 +6,8 @@ const { send, sleep, ev, key, mouse, setField, close } = await openPage();
 const { check, summarize } = createChecker();
 const rect = (selector) =>
   ev(`(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }; })()`);
+// The preview's own splitter. The results map has a separator of its own, above the map.
+const PREVIEW_SPLITTER = '[role=separator][data-pane="preview"]';
 const gridState = () =>
   ev(`(() => { const s = document.querySelector('[role=grid]'); return { scrollW: s.scrollWidth, clientW: s.clientWidth, heads: [...document.querySelectorAll('.head')].reduce((sum, h) => sum + h.getBoundingClientRect().width, 0) }; })()`);
 
@@ -24,7 +26,7 @@ await sleep(600);
 
 // ---- the preview starts at its default share and has a splitter
 const start = await rect('aside.preview');
-const splitter = await rect('[role=separator]');
+const splitter = await rect(PREVIEW_SPLITTER);
 check('the preview starts at about 38 percent of the window', start.w > 440 && start.w < 540, start);
 check('a splitter sits on the preview edge', splitter && Math.abs(splitter.cx - start.x) < 6, { splitter, start });
 
@@ -54,7 +56,7 @@ const extreme = await rect('.results');
 check('dragging as far as it goes still leaves the results 360 px', extreme.w >= 359 && extreme.w < 380, extreme);
 
 // ---- keyboard
-await ev(`document.querySelector('[role=separator]').focus()`);
+await ev(`document.querySelector('${PREVIEW_SPLITTER}').focus()`);
 const beforeKey = await rect('aside.preview');
 await key('ArrowRight');
 const afterRight = await rect('aside.preview');
@@ -65,11 +67,11 @@ check('Shift+Left widens it by 48 px', Math.round(afterShiftLeft.w - afterRight.
 await key('Home');
 const narrowest = await rect('aside.preview');
 check('Home makes it as narrow as allowed (280 px)', Math.round(narrowest.w) === 280, narrowest);
-const valueNow = await ev(`document.querySelector('[role=separator]').getAttribute('aria-valuenow')`);
+const valueNow = await ev(`document.querySelector('${PREVIEW_SPLITTER}').getAttribute('aria-valuenow')`);
 check('the splitter reports its value for assistive technology', Number(valueNow) === 280, valueNow);
 
 // ---- double-click resets
-await ev(`document.querySelector('[role=separator]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+await ev(`document.querySelector('${PREVIEW_SPLITTER}').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
 await sleep(300);
 const reset = await rect('aside.preview');
 check('double-clicking the splitter restores the default width', Math.abs(reset.w - start.w) < 4, { reset: reset.w, start: start.w });
@@ -104,10 +106,12 @@ check('the header fills the pane to its right edge', Math.abs(gridCollapsed.head
 
 // ---- F6 skips the hidden preview
 await ev(`document.querySelector('input[placeholder="Text to find"]').focus()`);
-await key('F6');
-await key('F6');
-const afterTwoF6 = await ev(`document.activeElement.closest('[data-pane]')?.getAttribute('data-pane')`);
-check('F6 cycles search, results, search while the preview is hidden', afterTwoF6 === 'search', afterTwoF6);
+const panesVisited = [];
+for (let press = 0; press < 3; press++) {
+  await key('F6');
+  panesVisited.push(await ev(`document.activeElement.closest('[data-pane]')?.getAttribute('data-pane')`));
+}
+check('F6 cycles search, results, map, search while the preview is hidden', panesVisited.join(' ') === 'results map search', panesVisited);
 
 // ---- collapse state persists and restore works with the shortcut
 await sleep(400);

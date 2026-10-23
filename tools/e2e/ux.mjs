@@ -1,6 +1,7 @@
 // End-to-end check of the UX pass in the real window, using real key events over CDP.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { PAGE_HELPERS } from './cdp.mjs';
+import { createChecker } from './page.mjs';
 
 const outDir = process.argv[2];
 mkdirSync(outDir, { recursive: true });
@@ -22,6 +23,8 @@ const send = (method, params = {}) =>
     socket.send(JSON.stringify({ id, method, params }));
   });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// The window never has the real focus (see openPage in page.mjs), so the page behaves as a focused one.
+await send('Emulation.setFocusEmulationEnabled', { enabled: true });
 const ev = async (expression) => {
   const reply = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
   if (reply.result.exceptionDetails) {
@@ -39,11 +42,7 @@ async function key(name, { ctrl = false, shift = false } = {}) {
   await sleep(140);
 }
 
-const results = [];
-const check = (name, ok, detail = '') => {
-  results.push({ name, ok: Boolean(ok), detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  -> ' + JSON.stringify(detail)}`);
-};
+const { check, summarize } = createChecker();
 
 // Start from a clean first-run window, whatever an earlier suite left behind.
 await ev(`localStorage.removeItem('spelunker.preferences.v1')`);
@@ -172,6 +171,8 @@ await ev(`document.querySelector('input[placeholder="Text to find"]').focus()`);
 await key('F6');
 check('F6 goes from search to results', (await ev(active))?.pane === 'results' && (await ev(active))?.role === 'grid', await ev(active));
 await key('F6');
+check('F6 goes on to the results map below the list', (await ev(active))?.pane === 'map', await ev(active));
+await key('F6');
 check('F6 goes on to the preview', (await ev(active))?.pane === 'preview', await ev(active));
 await key('F6');
 check('F6 wraps back to search', (await ev(active))?.pane === 'search', await ev(active));
@@ -277,8 +278,5 @@ const shot = await send('Page.captureScreenshot', { format: 'png' });
 writeFileSync(`${outDir}/forced-colors.png`, Buffer.from(shot.result.data, 'base64'));
 await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
 
-// ---------- summary
-const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length} of ${results.length} checks passed`);
-if (failed.length) console.log('FAILED: ' + failed.map((r) => r.name).join(' | '));
+summarize();
 socket.close();

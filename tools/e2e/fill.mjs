@@ -2,20 +2,13 @@
 // and in hand-sized mode. It runs the page in headless Edge against the dev server (mock backend),
 // because that reports resizes the way a real window does, and needs no Spelunker window.
 // Usage: start the dev server (npm run dev), then: node fill.mjs
-import { launchHeadlessEdge } from './headless.mjs';
+import { launchHeadlessEdge, resizeTo as resizeHeadless, settleFrames } from './headless.mjs';
 import { createChecker, openPage } from './page.mjs';
 
 const edge = await launchHeadlessEdge({ port: 9341, width: 1280, height: 780, name: 'fill' });
 const { send, sleep, ev, close } = await openPage({ webSocketDebuggerUrl: edge.webSocketDebuggerUrl });
 const { check, summarize } = createChecker();
-const resizeTo = async (width, height) => {
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
-  await sleep(400);
-  // Headless Edge only runs the rendering steps (where resize events and size observers fire) when a
-  // frame is drawn, so one is asked for, as a real window draws them on its own.
-  await send('Page.captureScreenshot', { format: 'jpeg', quality: 10 });
-  await sleep(700);
-};
+const resizeTo = (width, height) => resizeHeadless(send, width, height);
 /** How well the columns fill the grid: header total against the grid, and whether it scrolls sideways. */
 const fill = () =>
   ev(`(() => { const g = document.querySelector('[role=grid]'); const heads = [...document.querySelectorAll('.head')].map((h) => h.getBoundingClientRect().width); const total = heads.reduce((a, b) => a + b, 0); return { pane: g.clientWidth, total: Math.round(total), gap: Math.round(g.clientWidth - total), scrolls: g.scrollWidth > g.clientWidth + 1 }; })()`);
@@ -71,9 +64,7 @@ check('hand-sized: and narrow with it', fills(handNarrow) && handNarrow.total < 
 await resizeTo(1280, 780);
 const beforeHide = await fill();
 await ev(`document.querySelector('button[aria-label="Hide the preview"]').click()`);
-await sleep(400);
-await send('Page.captureScreenshot', { format: 'jpeg', quality: 10 });
-await sleep(700);
+await settleFrames(send, 900);
 const afterHide = await fill();
 check('hiding the preview widens the columns to the full width', fills(afterHide) && afterHide.total > beforeHide.total + 300, { beforeHide, afterHide });
 

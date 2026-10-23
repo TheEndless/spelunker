@@ -10,6 +10,8 @@ const KEY_CODES = {
 /** The Windows virtual-key code for a key name such as "ArrowDown", "F6", or a letter. */
 const keyCode = (name) => KEY_CODES[name] ?? name.toUpperCase().charCodeAt(0);
 
+export const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
 /**
  * Connects to the running app. `port` is the debug port the app was started with (see launch.ps1).
  * `webSocketDebuggerUrl` picks one page directly instead (see headless.mjs). `onEvent` receives
@@ -23,7 +25,10 @@ export async function openPage({ port = 9222, webSocketDebuggerUrl = null, onEve
     address = targets.find((target) => target.type === 'page').webSocketDebuggerUrl;
   }
   const socket = new WebSocket(address);
-  await new Promise((resolve) => (socket.onopen = resolve));
+  await new Promise((resolve, reject) => {
+    socket.onopen = resolve;
+    socket.onerror = () => reject(new Error(`could not connect to ${address}`));
+  });
 
   let nextId = 1;
   const pending = new Map();
@@ -40,7 +45,9 @@ export async function openPage({ port = 9222, webSocketDebuggerUrl = null, onEve
       socket.send(JSON.stringify({ id, method, params }));
     });
 
-  const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+  // The window under test never has the real focus (the scripts must not take it from the person
+  // using the machine), so the page is told to behave as a focused one: focus events, :focus-visible.
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true });
 
   /** Runs JavaScript in the page and returns its value, or `{ exception }` if it threw. */
   const ev = async (expression) => {
@@ -83,7 +90,10 @@ export async function openPage({ port = 9222, webSocketDebuggerUrl = null, onEve
   return { send, sleep, ev, key, mouse, setField, close: () => socket.close() };
 }
 
-/** Prints PASS or FAIL for each check, and a total at the end. */
+/**
+ * Prints PASS or FAIL for each check, and a total at the end. A failed check makes the script exit
+ * with a non-zero code, so a caller can tell a red run from a green one without reading the output.
+ */
 export function createChecker() {
   const results = [];
   const check = (name, ok, detail = '') => {
@@ -93,7 +103,10 @@ export function createChecker() {
   const summarize = () => {
     const failed = results.filter((result) => !result.ok);
     console.log(`\n${results.length - failed.length} of ${results.length} checks passed`);
-    if (failed.length > 0) console.log('FAILED: ' + failed.map((result) => result.name).join(' | '));
+    if (failed.length > 0) {
+      console.log('FAILED: ' + failed.map((result) => result.name).join(' | '));
+      process.exitCode = 1;
+    }
   };
   return { check, summarize };
 }
