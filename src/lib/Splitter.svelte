@@ -71,11 +71,13 @@
 <svelte:window onresize={refreshValues} />
 
 <!-- The W3C window splitter pattern: a separator that takes focus and is moved with the arrow keys.
-     The lint rules treat any separator as static, which this one is not. -->
+     The lint rules treat any separator as static, which this one is not. It is the preview's edge, so
+     focus on it counts as focus in the preview (hiding the preview from here moves focus to the results). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <div
   class="splitter"
   class:dragging
+  data-pane="preview"
   role="separator"
   aria-orientation="vertical"
   aria-label="Resize the preview. Left and Right change the width, Enter hides it."

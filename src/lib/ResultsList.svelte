@@ -44,6 +44,8 @@
     onSelect: (row: DisplayRow) => void;
     onOpen: (row: DisplayRow) => void;
     onContextMenu: (row: DisplayRow, x: number, y: number) => void | Promise<void>;
+    /** Scrolls the list to a row picked elsewhere (the map). A new token asks again for the same path. */
+    revealRequest?: { path: string; token: number } | null;
   }
 
   let {
@@ -60,6 +62,7 @@
     onSelect,
     onOpen,
     onContextMenu,
+    revealRequest = null,
   }: Props = $props();
 
   const ROW_HEIGHT = 26;
@@ -347,6 +350,18 @@
     if (!changed) return;
     queueMicrotask(() => {
       if (selectedIndex >= 0) revealIndex(selectedIndex);
+    });
+  });
+
+  // A row selected outside the list is scrolled into view, once per request.
+  let lastRevealToken = -1;
+  $effect(() => {
+    const request = revealRequest;
+    if (!request || request.token === lastRevealToken) return;
+    lastRevealToken = request.token;
+    queueMicrotask(() => {
+      const index = findRowIndex(rows, request.path, -1);
+      if (index >= 0) revealIndex(index);
     });
   });
 

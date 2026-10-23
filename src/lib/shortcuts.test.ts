@@ -26,6 +26,21 @@ describe('SHORTCUTS', () => {
     expect(new Set(actions).size).toBe(actions.length);
   });
 
+  it('lists Ctrl+Shift+M to show or hide the map in the Panes group', () => {
+    expect(shortcutsInGroup('Panes')).toContainEqual({ keys: 'Ctrl+Shift+M', action: 'Show or hide the results map', group: 'Panes' });
+  });
+
+  it('lists the map keys in the Results group', () => {
+    const results = shortcutsInGroup('Results').map((shortcut) => shortcut.keys);
+    expect(results).toContain('Arrow keys on the map');
+    expect(results).toContain('Ctrl+click on the map');
+  });
+
+  it('has no two shortcuts in the same group with the same keys and action', () => {
+    const entries = SHORTCUTS.map((shortcut) => `${shortcut.group}|${shortcut.keys}|${shortcut.action}`);
+    expect(new Set(entries).size).toBe(entries.length);
+  });
+
   it('lists groups in display order', () => {
     expect(SHORTCUT_GROUPS).toEqual(['Search', 'Results', 'Panes', 'Help']);
   });

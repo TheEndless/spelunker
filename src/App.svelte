@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import {
     copyText,
     hasShellMenu,
@@ -21,14 +21,18 @@
   import { editorTemplate } from './lib/editors';
   import { describeEmptyState } from './lib/emptyState';
   import { exportFileName, formatResults, type ExportFormat } from './lib/exportResults';
+  import HorizontalSplitter from './lib/HorizontalSplitter.svelte';
   import Icon from './lib/Icon.svelte';
   import { PANE_ORDER, nextPane, type PaneId } from './lib/paneCycle';
+  import { GRID_MIN_HEIGHT, MAP_MIN_HEIGHT, mapFits } from './lib/paneSplit';
   import { applyTheme, Preferences } from './lib/preferences.svelte';
   import { findRowIndex } from './lib/rowLookup';
   import PreviewPane from './lib/PreviewPane.svelte';
   import { applyRecipe, type Recipe } from './lib/recipes';
   import { buildSearchRequest, firstFilterError } from './lib/request';
   import ResultsList from './lib/ResultsList.svelte';
+  import ResultsMap from './lib/ResultsMap.svelte';
+  import { TreemapClient } from './lib/treemapClient.svelte';
   import WelcomePanel from './lib/WelcomePanel.svelte';
   import SearchBar from './lib/SearchBar.svelte';
   import { SavedSearchStore } from './lib/savedSearchStore.svelte';
@@ -72,7 +76,28 @@
    * less than 280 px or more than leaves the results 360 px.
    */
   const previewTrack = $derived(`clamp(280px, ${preferences.previewWidth === null ? '38%' : `${preferences.previewWidth}px`}, calc(100% - 360px))`);
-  const shownPanes = $derived<PaneId[]>(preferences.previewCollapsed ? ['search', 'results'] : PANE_ORDER);
+  const treemap = new TreemapClient(session);
+  let resultsMap = $state<ResultsMap>();
+  /** The results grid and the map below it. Its height decides whether the map fits. */
+  let leftColumn = $state<HTMLElement>();
+  let leftColumnHeight = $state(0);
+  /** Asks the list to scroll to a row chosen on the map. The token makes a repeat of the same path a new request. */
+  let revealRequest = $state<{ path: string; token: number } | null>(null);
+  let revealToken = 0;
+  /** The map is wanted from the moment a search starts, so its space is reserved before the first rows arrive. */
+  const mapWanted = $derived(!preferences.mapCollapsed && (session.running || session.summary !== null || session.rows.length > 0));
+  const mapTooShort = $derived(!mapFits(leftColumnHeight));
+  const mapShown = $derived(mapWanted && !mapTooShort);
+  /** The map's height as CSS, like the preview's width: the user's choice or about a third, within both minimums. */
+  const mapTrack = $derived(
+    `clamp(${MAP_MIN_HEIGHT}px, ${preferences.mapHeight === null ? '34%' : `${preferences.mapHeight}px`}, calc(100% - ${GRID_MIN_HEIGHT}px))`,
+  );
+  /** Matches needs Containing text. Without it the map uses Size, and the saved choice is kept for the next search. */
+  const canUseMatches = $derived((session.query?.text ?? '') !== '');
+  const effectiveMetric = $derived(preferences.mapMetric === 'matches' && !canUseMatches ? 'size' : preferences.mapMetric);
+  const shownPanes = $derived<PaneId[]>(
+    PANE_ORDER.filter((pane) => (pane !== 'preview' || !preferences.previewCollapsed) && (pane !== 'map' || mapShown)),
+  );
   let selectedPath = $state<string | null>(null);
   /** The criteria of the search whose results are on screen, used to explain an empty list. */
   let searchedCriteria = $state.raw<Criteria | null>(null);
@@ -144,9 +169,14 @@
     // "Search with Spelunker" in Explorer's menu starts the app (or reaches the running one) with a folder.
     void takeLaunchFolder().then((folder) => folder && useFolder(folder));
     const stopWatchingLaunches = watchOpenFolder(useFolder);
+    // The column's height does not depend on the map, so watching it to decide whether the map fits cannot loop.
+    const leftColumnObserver = new ResizeObserver(() => (leftColumnHeight = leftColumn?.clientHeight ?? 0));
+    if (leftColumn) leftColumnObserver.observe(leftColumn);
     return () => {
       void stopWatching.then((stop) => stop());
       void stopWatchingLaunches.then((stop) => stop());
+      leftColumnObserver.disconnect();
+      treemap.dispose();
     };
   });
 
@@ -171,12 +201,13 @@
   /** Which pane keyboard focus is in, or null when it is in none of them. */
   function currentPane(): PaneId | null {
     const pane = document.activeElement?.closest('[data-pane]')?.getAttribute('data-pane');
-    return pane === 'search' || pane === 'results' || pane === 'preview' ? pane : null;
+    return PANE_ORDER.find((id) => id === pane) ?? null;
   }
 
   function focusPane(pane: PaneId) {
     if (pane === 'search') searchBar.focusText();
     else if (pane === 'preview') previewPane?.focus();
+    else if (pane === 'map') resultsMap?.focus();
     else document.querySelector<HTMLElement>('[data-pane="results"] [role="grid"]')?.focus();
   }
 
@@ -186,6 +217,11 @@
     if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
       void togglePreview();
+      return;
+    }
+    if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'm') {
+      event.preventDefault();
+      toggleMap();
       return;
     }
     if (event.ctrlKey && !event.shiftKey && !event.altKey) {
@@ -231,6 +267,25 @@
     if (focusWasInPreview) focusPane(preferences.previewCollapsed ? 'results' : 'preview');
   }
 
+  /**
+   * Shows or hides the map. Like the Map button, it does nothing while the window is too short for
+   * the map, so the saved choice never flips without a visible change.
+   */
+  function toggleMap() {
+    if (mapTooShort) return;
+    preferences.mapCollapsed = !preferences.mapCollapsed;
+    preferences.save();
+  }
+
+  // However the map goes away (its toggle, a cleared search, a window too short), focus that was in
+  // it moves to the results. This runs before the map leaves the page, while focus can still be seen in it.
+  $effect.pre(() => {
+    if (mapShown) return;
+    untrack(() => {
+      if (currentPane() === 'map') void tick().then(() => focusPane('results'));
+    });
+  });
+
   const copy = (text: string) => copyText(text).catch((error) => say('error', `Could not copy: ${error}`));
 
   /** The lines of a file that matched the search, one per line, for pasting somewhere. */
@@ -256,7 +311,8 @@
     return actions;
   }
 
-  async function showRowMenu(row: DisplayRow, x: number, y: number) {
+  /** `origin` is the pane the menu was asked for from, which gets focus back when the menu closes. */
+  async function showRowMenu(row: DisplayRow, x: number, y: number, origin: PaneId = 'results') {
     if (!hasShellMenu) {
       menu = { row, x, y };
       return;
@@ -270,9 +326,10 @@
     } catch (error) {
       say('error', String(error));
     }
-    // The system menu takes focus with it. Put it back on the results so the keyboard keeps working.
+    // The system menu takes focus with it. Put it back where the menu came from so the keyboard keeps
+    // working. The map may have gone meanwhile (its last file removed), and then the results take it.
     await tick();
-    if (document.activeElement === document.body) focusPane('results');
+    if (document.activeElement === document.body) focusPane(shownPanes.includes(origin) ? origin : 'results');
   }
 
   function openAtLine(path: string, line: number) {
@@ -329,26 +386,78 @@
     style:--preview-width={previewTrack}
     style:grid-template-columns={preferences.previewCollapsed ? 'minmax(0, 1fr) 36px' : `minmax(0, 1fr) ${previewTrack}`}
   >
-    <section class="results" data-pane="results" aria-label="Results">
-      <ResultsList
-        rows={session.sortedRows}
-        {selectedPath}
-        sortColumn={session.sortColumn}
-        sortDirection={session.sortDirection}
-        running={session.running}
-        empty={emptyState}
-        welcome={idle ? welcome : undefined}
-        layout={preferences.columns}
-        onLayout={(layout) => {
-          preferences.columns = layout;
-          preferences.saveSoon();
-        }}
-        onSort={(column) => session.toggleSort(column)}
-        onSelect={(row) => (selectedPath = row.path)}
-        onOpen={(row) => openPath(row.path)}
-        onContextMenu={showRowMenu}
-      />
-    </section>
+    <div
+      class="left"
+      bind:this={leftColumn}
+      style:grid-template-rows={mapShown ? `minmax(0, 1fr) ${mapTrack}` : 'minmax(0, 1fr)'}
+    >
+      <section class="results" data-pane="results" aria-label="Results">
+        <ResultsList
+          rows={session.sortedRows}
+          {selectedPath}
+          {revealRequest}
+          sortColumn={session.sortColumn}
+          sortDirection={session.sortDirection}
+          running={session.running}
+          empty={emptyState}
+          welcome={idle ? welcome : undefined}
+          layout={preferences.columns}
+          onLayout={(layout) => {
+            preferences.columns = layout;
+            preferences.saveSoon();
+          }}
+          onSort={(column) => session.toggleSort(column)}
+          onSelect={(row) => (selectedPath = row.path)}
+          onOpen={(row) => openPath(row.path)}
+          onContextMenu={showRowMenu}
+        />
+      </section>
+      <!-- Mounted only while shown: a hidden map does no work, and each mount needs fresh canvases. -->
+      {#if mapShown}
+        <!-- The splitter belongs to the map's pane, so focus on it counts as focus in the map. -->
+        <div class="map-panel" data-pane="map">
+          <HorizontalSplitter
+            measure={() => ({
+              map: leftColumn?.querySelector('.map-panel')?.getBoundingClientRect().height ?? 0,
+              container: leftColumn?.clientHeight ?? 0,
+            })}
+            onResize={(height) => (preferences.mapHeight = height)}
+            onCommit={() => preferences.save()}
+            onReset={() => {
+              preferences.mapHeight = null;
+              preferences.save();
+            }}
+            onToggle={toggleMap}
+          />
+          <ResultsMap
+            bind:this={resultsMap}
+            client={treemap}
+            {session}
+            paletteId={preferences.palette}
+            themeVersion={`${preferences.theme}|${preferences.palette}|${preferences.highlightColor}`}
+            metric={effectiveMetric}
+            colorMode={preferences.mapColor}
+            {canUseMatches}
+            {selectedPath}
+            onMetric={(metric) => {
+              preferences.mapMetric = metric;
+              preferences.save();
+            }}
+            onColorMode={(mode) => {
+              preferences.mapColor = mode;
+              preferences.save();
+            }}
+            onSelect={(row) => {
+              selectedPath = row.path;
+              revealRequest = { path: row.path, token: ++revealToken };
+            }}
+            onOpen={(row) => openPath(row.path)}
+            onContextMenu={(row, x, y) => showRowMenu(row, x, y, 'map')}
+            onCollapse={toggleMap}
+          />
+        </div>
+      {/if}
+    </div>
     {#if preferences.previewCollapsed}
       <div class="rail" data-pane="preview">
         <button
@@ -402,6 +511,9 @@
     elapsedMs={session.elapsedMs}
     errors={session.errors}
     summary={session.summary}
+    mapOn={!preferences.mapCollapsed}
+    {mapTooShort}
+    onToggleMap={toggleMap}
   />
 </div>
 
@@ -469,9 +581,22 @@
     font-weight: 600;
     letter-spacing: 0.04em;
   }
+  /* The results grid, with the map below it when it is shown. Its rows come from the markup. */
+  .left {
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+  }
   .results {
     min-width: 0;
     min-height: 0;
+  }
+  /* A positioned box, since the splitter sits in its top edge. */
+  .map-panel {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    border-top: 1px solid var(--border);
   }
   .drop-hint {
     position: fixed;

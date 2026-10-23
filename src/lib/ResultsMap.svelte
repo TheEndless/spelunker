@@ -773,7 +773,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 8px;
+    /* The splitter's 9 px drag zone lies over the top of the toolbar, so the controls start below it. */
+    padding: 9px 8px 6px;
     background: var(--header-bg);
     border-bottom: 1px solid var(--border);
     min-width: 0;

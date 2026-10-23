@@ -1,7 +1,7 @@
-export type PaneId = 'search' | 'results' | 'preview';
+export type PaneId = 'search' | 'results' | 'map' | 'preview';
 
-/** The order F6 moves through, which is also the visual order. */
-export const PANE_ORDER: PaneId[] = ['search', 'results', 'preview'];
+/** The order F6 moves through, which is also the visual order (the map sits below the results). */
+export const PANE_ORDER: PaneId[] = ['search', 'results', 'map', 'preview'];
 
 /**
  * The pane that F6 (direction 1) or Shift+F6 (direction -1) moves to, among the panes that are

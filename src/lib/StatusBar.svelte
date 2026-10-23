@@ -1,6 +1,8 @@
 <script lang="ts">
   import ErrorsPopover from './ErrorsPopover.svelte';
   import { formatDuration } from './format';
+  import Icon from './Icon.svelte';
+  import { withShortcut } from './shortcuts';
   import { describeFind, statusPhase } from './statusSummary';
   import type { ErrorRow, Summary } from './types';
 
@@ -13,9 +15,26 @@
     elapsedMs: number;
     errors: ErrorRow[];
     summary: Summary | null;
+    /** The user wants the results map, which shows the Map button as pressed. */
+    mapOn?: boolean;
+    /** The window is too short for the map, so it is collapsed and the button cannot bring it back yet. */
+    mapTooShort?: boolean;
+    /** Shows or hides the map. Without it there is no Map button. */
+    onToggleMap?: () => void;
   }
 
-  let { running, stopping, filesScanned, matches, elapsedMs, errors, summary }: Props = $props();
+  let {
+    running,
+    stopping,
+    filesScanned,
+    matches,
+    elapsedMs,
+    errors,
+    summary,
+    mapOn = false,
+    mapTooShort = false,
+    onToggleMap,
+  }: Props = $props();
 
   let errorsOpen = $state(false);
 
@@ -62,6 +81,19 @@
       <span>{summary.binarySkipped.toLocaleString()} binary skipped</span>
     {/if}
   </span>
+  {#if onToggleMap}
+    <button
+      type="button"
+      class="map-toggle"
+      aria-pressed={mapOn}
+      disabled={mapTooShort}
+      title={mapTooShort ? 'The window is too short for the map' : withShortcut('Show or hide the results map', 'Ctrl+Shift+M')}
+      onclick={onToggleMap}
+    >
+      <Icon name="map" size={14} />
+      Map
+    </button>
+  {/if}
 </footer>
 
 <style>
@@ -114,5 +146,30 @@
   }
   .problem {
     color: var(--danger);
+  }
+  .map-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--text-muted);
+    font: inherit;
+  }
+  .map-toggle:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .map-toggle[aria-pressed='true'] {
+    border-color: var(--border-strong);
+    background: var(--surface);
+    color: var(--text);
+  }
+  .map-toggle:disabled {
+    color: var(--disabled-text);
+    cursor: not-allowed;
   }
 </style>
