@@ -34,6 +34,15 @@ describe('SHORTCUTS', () => {
     const results = shortcutsInGroup('Results').map((shortcut) => shortcut.keys);
     expect(results).toContain('Arrow keys on the map');
     expect(results).toContain('Ctrl+click on the map');
+    expect(results).toContain('Z or Ctrl+Enter on the map');
+    expect(results).toContain('Backspace on the map');
+  });
+
+  it('names which splitter each splitter key belongs to', () => {
+    const panes = shortcutsInGroup('Panes').map((shortcut) => shortcut.keys);
+    expect(panes).toContain('Left or Right on the preview splitter');
+    expect(panes).toContain('Up or Down on the map splitter');
+    expect(panes).not.toContain('Left or Right on the splitter');
   });
 
   it('has no two shortcuts in the same group with the same keys and action', () => {
