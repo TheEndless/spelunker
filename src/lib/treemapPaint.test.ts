@@ -259,7 +259,7 @@ describe('paintCushion', () => {
 
   it('leaves the background where no rectangle is, fully opaque', () => {
     const { context, pixelAt } = fakeContext();
-    paintCushion(context, handLayout([{ x: 10, y: 10, w: 20, h: 10 }]), 60, 40, cushion(), null,null);
+    paintCushion(context, handLayout([{ x: 10, y: 10, w: 20, h: 10 }]), 60, 40, cushion(), null, null);
     for (const [px, py] of [[0, 0], [59, 39], [9, 15], [30, 15], [15, 9], [15, 20], [45, 30]]) {
       const pixel = pixelAt(px, py);
       expect(isBackground(pixel)).toBe(true);
@@ -270,11 +270,11 @@ describe('paintCushion', () => {
 
   it('lights a tile from the top left: its top-left corner is brighter than its bottom-right, and a level tile is even', () => {
     const shaded = fakeContext();
-    paintCushion(shaded.context, handLayout([{ x: 0, y: 0, w: 200, h: 120 }]), 200, 120, cushion(), null,null);
+    paintCushion(shaded.context, handLayout([{ x: 0, y: 0, w: 200, h: 120 }]), 200, 120, cushion(), null, null);
     expect(patchMean(shaded.pixelAt, 10, 10, 20)).toBeGreaterThan(patchMean(shaded.pixelAt, 170, 90, 20) * 1.2);
 
     const level = fakeContext();
-    paintCushion(level.context, handLayout([{ x: 0, y: 0, w: 200, h: 120, level: true }]), 200, 120, cushion(), null,null);
+    paintCushion(level.context, handLayout([{ x: 0, y: 0, w: 200, h: 120, level: true }]), 200, 120, cushion(), null, null);
     expect(patchMean(level.pixelAt, 10, 10, 20)).toBe(patchMean(level.pixelAt, 170, 90, 20));
   });
 
@@ -283,7 +283,7 @@ describe('paintCushion', () => {
     /** The brightness painted at a position given as fractions of the tile's width and height. */
     function brightnessAtFraction(width: number, height: number, fractionX: number, fractionY: number): number {
       const { context, pixelAt } = fakeContext();
-      paintCushion(context, handLayout([{ x: 0, y: 0, w: width, h: height }]), width, height, cushion(), null,null);
+      paintCushion(context, handLayout([{ x: 0, y: 0, w: width, h: height }]), width, height, cushion(), null, null);
       const pixel = pixelAt(Math.floor(width * fractionX), Math.floor(height * fractionY));
       return pixel.slice(0, 3).reduce((total, value) => total + value, 0) / base;
     }
@@ -296,7 +296,7 @@ describe('paintCushion', () => {
     for (const devicePixelRatio of [1, 1.25, 1.5, 2]) {
       const { context, pixelAt } = fakeContext();
       const layout = handLayout([{ x: 3.3, y: 2.7, w: 71.9, h: 40.6, category: 3 }]);
-      paintCushion(context, layout, 80, 48, cushion({ pixelRatio: devicePixelRatio }), null,null);
+      paintCushion(context, layout, 80, 48, cushion({ pixelRatio: devicePixelRatio }), null, null);
       const base = rgbOf(colors.category[3]);
       const coefficients = coefficientsOf(layout, 0);
       const left = Math.round(3.3 * devicePixelRatio);
@@ -316,7 +316,7 @@ describe('paintCushion', () => {
     for (const devicePixelRatio of [1, 1.25, 1.5, 2]) {
       const { context, pixelAt } = fakeContext();
       const layout = handLayout([{ x: 0, y: 0, w: 50.4, h: 40 }, { x: 50.4, y: 0, w: 49.6, h: 40, category: 1 }]);
-      paintCushion(context, layout, 100, 40, cushion({ pixelRatio: devicePixelRatio }), null,null);
+      paintCushion(context, layout, 100, 40, cushion({ pixelRatio: devicePixelRatio }), null, null);
       const row = Math.round(20 * devicePixelRatio);
       for (let px = 0; px < Math.round(100 * devicePixelRatio); px++) expect(isBackground(pixelAt(px, row))).toBe(false);
     }
@@ -324,14 +324,14 @@ describe('paintCushion', () => {
 
   it('writes nothing past the right edge (no wrap into the next row) and clamps a rectangle that runs off the canvas', () => {
     const atEdge = fakeContext();
-    paintCushion(atEdge.context, handLayout([{ x: 5, y: 1, w: 5, h: 2 }]), 10, 5, cushion(), null,null);
+    paintCushion(atEdge.context, handLayout([{ x: 5, y: 1, w: 5, h: 2 }]), 10, 5, cushion(), null, null);
     expect(isBackground(atEdge.pixelAt(9, 1))).toBe(false);
     expect(isBackground(atEdge.pixelAt(9, 2))).toBe(false);
     for (const py of [0, 1, 2, 3, 4]) expect(isBackground(atEdge.pixelAt(0, py))).toBe(true);
     expect(isBackground(atEdge.pixelAt(5, 3))).toBe(true);
 
     const pastEdges = fakeContext();
-    paintCushion(pastEdges.context, handLayout([{ x: 7, y: 2, w: 10, h: 9 }, { x: -4, y: -3, w: 6, h: 4 }]), 10, 5, cushion(), null,null);
+    paintCushion(pastEdges.context, handLayout([{ x: 7, y: 2, w: 10, h: 9 }, { x: -4, y: -3, w: 6, h: 4 }]), 10, 5, cushion(), null, null);
     for (let py = 0; py < 5; py++) {
       for (let px = 0; px < 10; px++) {
         const inside = (px >= 7 && py >= 2) || (px < 2 && py < 1);
@@ -354,11 +354,31 @@ describe('paintCushion', () => {
     expect(calls.filter((call) => call.name === 'fillText')).toHaveLength(0);
   });
 
-  it('skips a rectangle under half a CSS pixel and keeps one device pixel for a thin one, as flat painting does', () => {
+  it('paints a rectangle under half a CSS pixel only on the pixels it rounds to, and keeps one device pixel for a thin one', () => {
     const { context, pixelAt } = fakeContext();
-    // The second rectangle's edges both round to 11, so the one-pixel rule keeps column 11.
-    paintCushion(context, handLayout([{ x: 5.2, y: 2, w: 0.4, h: 6 }, { x: 10.6, y: 2, w: 0.6, h: 6 }]), 30, 10, cushion(), null,null);
-    for (let px = 0; px < 30; px++) expect(isBackground(pixelAt(px, 4))).toBe(px !== 11);
+    // 5.1 to 5.4 rounds to no column, so it writes nothing. 15.3 to 15.7 rounds to column 15 alone,
+    // which no neighbour rounds to, so it fills that column. 10.6 to 11.2 rounds to 11 at both edges,
+    // so the one-pixel rule keeps column 11.
+    const layout = handLayout([{ x: 5.1, y: 2, w: 0.3, h: 6 }, { x: 15.3, y: 2, w: 0.4, h: 6 }, { x: 10.6, y: 2, w: 0.6, h: 6 }]);
+    paintCushion(context, layout, 30, 10, cushion(), null, null);
+    for (let px = 0; px < 30; px++) expect(isBackground(pixelAt(px, 4))).toBe(px !== 11 && px !== 15);
+  });
+
+  it('leaves no background speck where slivers under half a pixel sit between neighbours', () => {
+    for (const devicePixelRatio of [1, 1.25, 2]) {
+      const { context, pixelAt } = fakeContext();
+      // Eighths add up exactly in Float32, so each sliver starts where the one before it ends.
+      const layout = handLayout([
+        { x: 0, y: 0, w: 10.25, h: 20 },
+        { x: 10.25, y: 0, w: 0.375, h: 20, category: 1 },
+        { x: 10.625, y: 0, w: 0.25, h: 20, category: 2 },
+        { x: 10.875, y: 0, w: 0.375, h: 20, category: 3 },
+        { x: 11.25, y: 0, w: 8.75, h: 20, category: 4 },
+      ]);
+      paintCushion(context, layout, 20, 20, cushion({ pixelRatio: devicePixelRatio }), null, null);
+      const row = Math.round(10 * devicePixelRatio);
+      for (let px = 0; px < Math.round(20 * devicePixelRatio); px++) expect(isBackground(pixelAt(px, row))).toBe(false);
+    }
   });
 
   it('writes nothing and throws nothing for a zero-size rectangle', () => {
@@ -371,7 +391,7 @@ describe('paintCushion', () => {
 
   it('works in device pixels at ratio 2: the buffer is the rounded backing size and edges are rounded device positions', () => {
     const { context, calls, pixelAt } = fakeContext();
-    paintCushion(context, handLayout([{ x: 3.3, y: 2.2, w: 10.1, h: 6.1 }]), 50.3, 20.2, cushion({ pixelRatio: 2 }), null,null);
+    paintCushion(context, handLayout([{ x: 3.3, y: 2.2, w: 10.1, h: 6.1 }]), 50.3, 20.2, cushion({ pixelRatio: 2 }), null, null);
     const put = calls.find((call) => call.name === 'putImageData');
     expect(put?.args).toEqual([101, 40, 0, 0]);
     // Left round(6.6) = 7, right round(26.8) = 27, top round(4.4) = 4, bottom round(16.6) = 17.
@@ -387,7 +407,7 @@ describe('paintCushion', () => {
 
   it('puts nothing on a canvas with no device pixels', () => {
     const { context, calls } = fakeContext();
-    expect(() => paintCushion(context, handLayout([{ x: 0, y: 0, w: 1, h: 1 }]), 0.2, 30, cushion(), null,null)).not.toThrow();
+    expect(() => paintCushion(context, handLayout([{ x: 0, y: 0, w: 1, h: 1 }]), 0.2, 30, cushion(), null, null)).not.toThrow();
     expect(calls.filter((call) => call.name === 'putImageData' || call.name === 'createImageData')).toHaveLength(0);
   });
 
@@ -412,9 +432,9 @@ describe('paintCushion', () => {
 
   it('reuses one image while the backing size stays the same', () => {
     const first = fakeContext();
-    paintCushion(first.context, handLayout([{ x: 0, y: 0, w: 10, h: 10 }]), 37, 23, cushion(), null,null);
+    paintCushion(first.context, handLayout([{ x: 0, y: 0, w: 10, h: 10 }]), 37, 23, cushion(), null, null);
     const second = fakeContext();
-    paintCushion(second.context, handLayout([{ x: 5, y: 5, w: 10, h: 10 }]), 37, 23, cushion(), null,null);
+    paintCushion(second.context, handLayout([{ x: 5, y: 5, w: 10, h: 10 }]), 37, 23, cushion(), null, null);
     expect(second.calls.filter((call) => call.name === 'createImageData')).toHaveLength(0);
     // The reused image starts again from the background, so the first paint leaves nothing behind.
     expect(isBackground(second.pixelAt(1, 1))).toBe(true);
@@ -441,9 +461,9 @@ describe('paintCushion', () => {
     }
     const layout = handLayout(rects);
     const { context } = fakeContext();
-    paintCushion(context, layout, 2400, 520, cushion(), null,null);
+    paintCushion(context, layout, 2400, 520, cushion(), null, null);
     const started = performance.now();
-    paintCushion(context, layout, 2400, 520, cushion(), null,null);
+    paintCushion(context, layout, 2400, 520, cushion(), null, null);
     expect(performance.now() - started).toBeLessThan(250);
   });
 });

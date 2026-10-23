@@ -219,14 +219,16 @@ export function paintCushion(
   const surface = layout.surface;
 
   for (let i = 0; i < layout.count; i++) {
-    if (layout.w[i] < 0.5 || layout.h[i] < 0.5) continue;
     // Edges on whole device pixels by the same rounding as snapToDevicePixel, so neighbours share an
-    // edge, and at least one device pixel each way. Then cut to the image: a write past the right
-    // edge would land at the start of the next row.
+    // edge, and at least one device pixel each way. A sliver under half a CSS pixel gets no such
+    // minimum, so it covers only the pixels its own edges round to. Those belong to no neighbour, and
+    // there is no gap between tiles to hide them, so skipping it would leave a background speck. Then
+    // cut to the image: a write past the right edge would land at the start of the next row.
+    const minimumSpan = layout.w[i] < 0.5 || layout.h[i] < 0.5 ? 0 : 1;
     const left = Math.round(layout.x[i] * devicePixelRatio);
     const top = Math.round(layout.y[i] * devicePixelRatio);
-    const right = Math.min(Math.max(Math.round((layout.x[i] + layout.w[i]) * devicePixelRatio), left + 1), bufferWidth);
-    const bottom = Math.min(Math.max(Math.round((layout.y[i] + layout.h[i]) * devicePixelRatio), top + 1), bufferHeight);
+    const right = Math.min(Math.max(Math.round((layout.x[i] + layout.w[i]) * devicePixelRatio), left + minimumSpan), bufferWidth);
+    const bottom = Math.min(Math.max(Math.round((layout.y[i] + layout.h[i]) * devicePixelRatio), top + minimumSpan), bufferHeight);
     const firstColumn = Math.max(left, 0);
     const firstRow = Math.max(top, 0);
     if (firstColumn >= right || firstRow >= bottom) continue;
