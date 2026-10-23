@@ -12,11 +12,11 @@ function loneRidge(width: number, height: number): [number, number, number, numb
 
 describe('addRidge', () => {
   it('matches the cushion construction for one ridge', () => {
-    const [sx1, sx2, sy1, sy2] = loneRidge(100, 50);
-    expect(sx1).toBeCloseTo((4 * CUSHION_HEIGHT * 100) / 100, 6); // 4h (x2 + x1) / (x2 - x1) = 4h at x1 = 0
-    expect(sx2).toBeCloseTo((-4 * CUSHION_HEIGHT) / 100, 6);
-    expect(sy1).toBeCloseTo((4 * CUSHION_HEIGHT * 50) / 50, 6);
-    expect(sy2).toBeCloseTo((-4 * CUSHION_HEIGHT) / 50, 6);
+    const [linearX, quadraticX, linearY, quadraticY] = loneRidge(100, 50);
+    expect(linearX).toBeCloseTo((4 * CUSHION_HEIGHT * 100) / 100, 6); // 4h (x2 + x1) / (x2 - x1) = 4h at x1 = 0
+    expect(quadraticX).toBeCloseTo((-4 * CUSHION_HEIGHT) / 100, 6);
+    expect(linearY).toBeCloseTo((4 * CUSHION_HEIGHT * 50) / 50, 6);
+    expect(quadraticY).toBeCloseTo((-4 * CUSHION_HEIGHT) / 50, 6);
   });
 
   it('adds onto existing coefficients and honours the offset', () => {
@@ -37,22 +37,22 @@ describe('addRidge', () => {
 });
 
 describe('brightnessAt', () => {
-  it('is the ambient floor value with no surface only when facing away, and the top value when level', () => {
+  it('lights a level surface with ambient plus the diffuse share of the light\'s z component', () => {
     // A level surface faces mostly along +z, toward the light's z component.
     const level = brightnessAt(0, 0, 0, 0, 5, 5);
     expect(level).toBeCloseTo(CUSHION_AMBIENT + (CUSHION_DIFFUSE * 10) / Math.hypot(-1, -1, 10), 4);
   });
 
   it('lights the top-left of a tile more than the bottom-right', () => {
-    const [sx1, sx2, sy1, sy2] = loneRidge(100, 100);
-    expect(brightnessAt(sx1, sx2, sy1, sy2, 5, 5)).toBeGreaterThan(brightnessAt(sx1, sx2, sy1, sy2, 95, 95));
+    const [linearX, quadraticX, linearY, quadraticY] = loneRidge(100, 100);
+    expect(brightnessAt(linearX, quadraticX, linearY, quadraticY, 5, 5)).toBeGreaterThan(brightnessAt(linearX, quadraticX, linearY, quadraticY, 95, 95));
   });
 
   it('never goes below the minimum brightness and never above ambient plus diffuse', () => {
-    const [sx1, sx2, sy1, sy2] = loneRidge(40, 40);
+    const [linearX, quadraticX, linearY, quadraticY] = loneRidge(40, 40);
     for (let x = 0.5; x < 40; x += 1) {
       for (let y = 0.5; y < 40; y += 1) {
-        const value = brightnessAt(sx1, sx2, sy1, sy2, x, y);
+        const value = brightnessAt(linearX, quadraticX, linearY, quadraticY, x, y);
         expect(value).toBeGreaterThanOrEqual(CUSHION_MIN_BRIGHTNESS);
         expect(value).toBeLessThanOrEqual(CUSHION_AMBIENT + CUSHION_DIFFUSE + 1e-9);
       }
@@ -82,11 +82,11 @@ describe('brightnessOfNormal', () => {
     const outer = [0, 0, 0, 0];
     addRidge(outer, 0, 0, 0, 100, 60, CUSHION_HEIGHT);
     addRidge(outer, 0, 30, 10, 90, 55, CUSHION_HEIGHT * 0.91);
-    const [sx1, sx2, sy1, sy2] = outer;
+    const [linearX, quadraticX, linearY, quadraticY] = outer;
     for (let x = -0.5; x <= 101; x += 3.7) {
       for (let y = -0.5; y <= 61; y += 2.9) {
-        const split = brightnessOfNormal(surfaceNormal(sx1, sx2, x), surfaceNormal(sy1, sy2, y));
-        expect(Math.abs(split - brightnessAt(sx1, sx2, sy1, sy2, x, y))).toBeLessThan(1e-6);
+        const split = brightnessOfNormal(surfaceNormal(linearX, quadraticX, x), surfaceNormal(linearY, quadraticY, y));
+        expect(Math.abs(split - brightnessAt(linearX, quadraticX, linearY, quadraticY, x, y))).toBeLessThan(1e-6);
       }
     }
   });

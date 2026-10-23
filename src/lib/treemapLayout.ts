@@ -52,7 +52,7 @@ export interface Layout {
   weight: Float64Array;
   fileCount: Uint32Array;
   folderId: Int32Array;
-  /** Four cushion coefficients [sx1, sx2, sy1, sy2] per rectangle, in emit order. */
+  /** Four cushion coefficients [linearX, quadraticX, linearY, quadraticY] per rectangle, in emit order. */
   surface: Float32Array;
   frameCount: number;
   frameX: Float32Array;

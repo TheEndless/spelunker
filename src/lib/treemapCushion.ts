@@ -13,7 +13,7 @@ const LIGHT_Y = -1 / LIGHT_LENGTH;
 const LIGHT_Z = 10 / LIGHT_LENGTH;
 
 /**
- * Adds a ridge of `height` over the rectangle to the four coefficients [sx1, sx2, sy1, sy2] stored at
+ * Adds a ridge of `height` over the rectangle to the four coefficients [linearX, quadraticX, linearY, quadraticY] stored at
  * `offset`. A side with no extent adds nothing, so degenerate rectangles never produce infinities.
  */
 export function addRidge(
@@ -39,8 +39,8 @@ export function addRidge(
 }
 
 /**
- * One axis of the surface normal at `coordinate`, from that axis's two coefficients ([sx1, sx2] or
- * [sy1, sy2]). It depends on that axis alone, so a painter can work it out once per column and once per row.
+ * One axis of the surface normal at `coordinate`, from that axis's two coefficients ([linearX, quadraticX]
+ * or [linearY, quadraticY]). It depends on that axis alone, so a painter can work it out once per column and once per row.
  */
 export function surfaceNormal(linear: number, quadratic: number, coordinate: number): number {
   return -(2 * quadratic * coordinate + linear);
@@ -53,8 +53,8 @@ export function brightnessOfNormal(normalX: number, normalY: number): number {
 }
 
 /** How lit the surface is at (x, y), between the minimum brightness and ambient plus diffuse. */
-export function brightnessAt(sx1: number, sx2: number, sy1: number, sy2: number, x: number, y: number): number {
-  return brightnessOfNormal(surfaceNormal(sx1, sx2, x), surfaceNormal(sy1, sy2, y));
+export function brightnessAt(linearX: number, quadraticX: number, linearY: number, quadraticY: number, x: number, y: number): number {
+  return brightnessOfNormal(surfaceNormal(linearX, quadraticX, x), surfaceNormal(linearY, quadraticY, y));
 }
 
 /**

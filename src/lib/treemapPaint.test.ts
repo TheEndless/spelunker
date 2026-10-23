@@ -323,8 +323,9 @@ describe('paintCushion', () => {
   });
 
   it('writes nothing past the right edge (no wrap into the next row) and clamps a rectangle that runs off the canvas', () => {
+    // Runs two columns past the right edge, so an unclamped write would land in columns 0 and 1 of the next row.
     const atEdge = fakeContext();
-    paintCushion(atEdge.context, handLayout([{ x: 5, y: 1, w: 5, h: 2 }]), 10, 5, cushion(), null, null);
+    paintCushion(atEdge.context, handLayout([{ x: 5, y: 1, w: 7, h: 2 }]), 10, 5, cushion(), null, null);
     expect(isBackground(atEdge.pixelAt(9, 1))).toBe(false);
     expect(isBackground(atEdge.pixelAt(9, 2))).toBe(false);
     for (const py of [0, 1, 2, 3, 4]) expect(isBackground(atEdge.pixelAt(0, py))).toBe(true);

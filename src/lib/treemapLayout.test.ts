@@ -238,7 +238,7 @@ describe('surface coefficients', () => {
     const result = layout(tree, { ...exact, width: 3000, height: 3000 });
     expect(result.count).toBeGreaterThan(4096);
     const last = result.count - 1;
-    // Every ridge adds a negative sx2, so a rectangle kept from before the growth and one written after it both have one.
+    // Every ridge adds a negative quadraticX, so a rectangle kept from before the growth and one written after it both have one.
     expect(result.surface[1]).toBeLessThan(0);
     expect(result.surface[last * 4 + 1]).toBeLessThan(0);
     for (let i = 0; i < result.count * 4; i++) expect(Number.isFinite(result.surface[i])).toBe(true);
