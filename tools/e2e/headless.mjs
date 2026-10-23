@@ -41,9 +41,9 @@ export async function settleFrames(send, milliseconds) {
   }
 }
 
-/** Gives the headless page a new viewport size and lets it settle. */
-export async function resizeTo(send, width, height) {
-  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+/** Gives the headless page a new viewport size in CSS pixels, at `pixelRatio` device pixels each, and lets it settle. */
+export async function resizeTo(send, width, height, pixelRatio = 1) {
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: pixelRatio, mobile: false });
   await settleFrames(send, 900);
 }
 

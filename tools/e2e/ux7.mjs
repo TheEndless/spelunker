@@ -50,7 +50,7 @@ const shot = async (name) => {
   writeFileSync(join(shotsFolder, `${name}.png`), Buffer.from(reply.result.data, 'base64'));
   console.log(`      saved ${name}.png`);
 };
-const resizeTo = (width, height) => resizeHeadless(send, width, height);
+const resizeTo = (width, height, pixelRatio) => resizeHeadless(send, width, height, pixelRatio);
 const click = async (x, y, modifiers = 0) => {
   await mouse('mouseMoved', x, y, { modifiers });
   await mouse('mousePressed', x, y, { modifiers });
@@ -488,18 +488,23 @@ async function browserChecks() {
   check('13. restoring the size brings the map back', restored.shown && restored.toggle?.ariaDisabled === null && restored.toggle?.pressed === 'true' && restored.toggle?.description === '', restored.toggle);
 
   // ---- 14. forced colors, with each map shading
+  const forcedSamples = {};
   for (const shading of ['Cushion', 'Flat']) {
     if (shading !== 'Cushion') await chooseShading(shading);
     const normalSample = await sampleBase();
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await waitForSettledMap();
     const forcedSample = await sampleBase();
+    forcedSamples[shading] = forcedSample;
     await shot(`forced-colors-${shading.toLowerCase()}`);
     measured(`14. ${shading}: chromatic (filled) pixels of 200`, { normal: normalSample.chromatic, forced: forcedSample.chromatic, forcedDistinctColors: forcedSample.distinct });
     check(`14. ${shading}: under forced colors the map draws outlines only (under 5 percent filled)`, forcedSample.chromatic < 10 && forcedSample.distinct >= 2 && forcedSample.signature !== normalSample.signature, { chromatic: forcedSample.chromatic, distinct: forcedSample.distinct });
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await waitForSettledMap();
   }
+  // Forced colors ignores the shading setting, layout included, so the folder gaps that show the
+  // grouping are there with either choice and the two pictures are the same.
+  check('14. forced colors paints the same picture with Cushion chosen as with Flat', forcedSamples.Cushion?.opaque === 200 && forcedSamples.Cushion.signature === forcedSamples.Flat?.signature, { cushionDistinct: forcedSamples.Cushion?.distinct, flatDistinct: forcedSamples.Flat?.distinct });
   await chooseShading('Cushion');
 
   // ---- 15. light and dark
@@ -526,6 +531,63 @@ async function browserChecks() {
 
   // ---- 19. cushion and flat shading, on the deep fixture, whose large files make large tiles
   await shadingChecks();
+
+  // ---- 16. the paint budget at ratio 2, last, since it resizes the window and resets the map height
+  await ratioTwoPaintChecks();
+}
+
+/**
+ * Resizes the window at `pixelRatio` until the map stage is about `cssWidth` by `cssHeight`, resetting
+ * the map to its default height (a share of the column) each time, and returns the stage's sizes.
+ * The stage grows by about 0.62 of a window width change and 0.34 of a height change.
+ */
+async function sizeStageTo(cssWidth, cssHeight, pixelRatio) {
+  let windowWidth = Math.round(1280 + (cssWidth - 794) / 0.62);
+  let windowHeight = Math.round(800 + (cssHeight - 126) / 0.34);
+  let stage = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    await resizeTo(windowWidth, windowHeight, pixelRatio);
+    await ev(`document.querySelector('.map-panel [role=separator]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    await waitForSettledMap();
+    stage = await ev(`(() => { const box = document.querySelector('[data-map-stage]').getBoundingClientRect(); const canvas = document.querySelector('[data-map-stage] canvas.base'); return { window: [innerWidth, innerHeight], css: [Math.round(box.width), Math.round(box.height)], device: [canvas.width, canvas.height], ratio: devicePixelRatio }; })()`);
+    const [width, height] = stage.css;
+    if (Math.abs(width - cssWidth) <= cssWidth * 0.02 && Math.abs(height - cssHeight) <= cssHeight * 0.02) break;
+    windowWidth = Math.round(windowWidth + (cssWidth - width) / 0.62);
+    windowHeight = Math.round(windowHeight + (cssHeight - height) / 0.34);
+  }
+  return stage;
+}
+
+/** Worker cushion paint times of three repaints of the whole deep fixture (Age, File type, Age again). */
+async function paintSamples() {
+  const samples = [];
+  for (const label of ['Age', 'File type', 'Age']) {
+    await radio('Color', label);
+    samples.push(Number((await ev('window.__spMapProbe.timings()')).paint.toFixed(1)));
+  }
+  await radio('Color', 'File type');
+  return samples;
+}
+
+/**
+ * Check 16 at ratio 2: the paint budget is defined at 2400 by 520 device pixels, which a map of about
+ * 1200 by 260 CSS pixels has at ratio 2. The median of three repaints is asserted. One larger map is
+ * measured and printed only, to show how the time grows with the pixel count.
+ */
+async function ratioTwoPaintChecks() {
+  await search('deep');
+  const budgetStage = await sizeStageTo(1200, 260, 2);
+  const crumbs = (await state()).crumbs;
+  const budgetSamples = await paintSamples();
+  const median = [...budgetSamples].sort((left, right) => left - right)[1];
+  measured('16. ratio 2 at the budget size: stage and cushion paint times (ms)', { ...budgetStage, crumbs: crumbs.length, paint: budgetSamples });
+  check(`16. worker cushion paint under ${BUDGET.paintMs} ms at ratio 2 and about 2400 by 520 device pixels (median of three)`, budgetStage.ratio === 2 && Math.abs(budgetStage.device[0] * budgetStage.device[1] - 2400 * 520) <= 2400 * 520 * 0.05 && median < BUDGET.paintMs, { device: budgetStage.device, median });
+  if (shotsFolder) await shot('deep-light-type-ratio2');
+
+  const largeStage = await sizeStageTo(1920, 600, 2);
+  measured('16. ratio 2 at a large size, not asserted: stage and cushion paint times (ms)', { ...largeStage, paint: await paintSamples() });
+  await resizeTo(1280, 800, 1);
+  await waitForSettledMap();
 }
 
 /**
@@ -553,7 +615,8 @@ async function shadingChecks() {
   const flatSample = await sampleBase();
   const flatOverlay = await sampleOverlay();
   measured('19. flat: the same patches', flatLight);
-  check('19. flat: the largest tile is the same color at its top left and bottom right', flatLight && flatLight.height >= LARGE_TILE && flatLight.topLeft === flatLight.bottomRight, flatLight);
+  // Both patches above 0, since an unpainted canvas would read 0 at both and match too.
+  check('19. flat: the largest tile is the same color at its top left and bottom right', flatLight && flatLight.height >= LARGE_TILE && flatLight.topLeft > 0 && flatLight.topLeft === flatLight.bottomRight, flatLight);
   check('19. switching to Flat repaints the map', flatSample?.opaque === 200 && cushionSample?.opaque === 200 && flatSample.signature !== cushionSample.signature, { cushion: cushionSample?.opaque, flat: flatSample?.opaque });
   check('19. and keeps the zoom and the selected file, still outlined', cushioned.crumbs.length > 1 && JSON.stringify(flattened.crumbs) === JSON.stringify(cushioned.crumbs) && cushioned.selectedName !== null && flattened.selectedName === cushioned.selectedName && flatOverlay?.anyOpaque, { before: { crumbs: cushioned.crumbs, selected: cushioned.selectedName }, after: { crumbs: flattened.crumbs, selected: flattened.selectedName }, outlined: flatOverlay?.anyOpaque });
 
@@ -567,7 +630,7 @@ async function shadingChecks() {
   await search('deep');
   await zoomToLargeFile();
   const reloadedLight = await ev('window.__ux7.tileLight()');
-  check('19. Flat persists across a reload, in Settings and on the map', storedShading === 'flat' && reloadedChoice.checked === 'Flat' && reloadedLight?.height >= LARGE_TILE && reloadedLight.topLeft === reloadedLight.bottomRight, { storedShading, reloadedChoice, reloadedLight });
+  check('19. Flat persists across a reload, in Settings and on the map', storedShading === 'flat' && reloadedChoice.checked === 'Flat' && reloadedLight?.height >= LARGE_TILE && reloadedLight.topLeft > 0 && reloadedLight.topLeft === reloadedLight.bottomRight, { storedShading, reloadedChoice, reloadedLight });
 
   await chooseShading('Cushion');
   const backLight = await ev('window.__ux7.tileLight()');
