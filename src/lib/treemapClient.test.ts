@@ -13,7 +13,7 @@ const view = (width = 100) => ({
 });
 
 const layoutReply = (sequence: number) => ({
-  type: 'layout', sequence, layout: { count: 0 }, crumbs: [], zoomFolderId: 0, painted: true, largestFolder: '',
+  type: 'layout', sequence, layout: { count: 0 }, metric: 'size', crumbs: [], zoomFolderId: 0, painted: true, largestFolder: '',
   elapsedMs: { layout: 1, paint: 1 },
 });
 
@@ -137,6 +137,20 @@ describe('TreemapClient', () => {
     worker.onmessage!({ data: layoutReply(sequence) } as MessageEvent);
     expect(client.layout).not.toBeNull();
     expect(client.index).not.toBeNull();
+  });
+
+  it('takes the metric of the layout from its reply, not from the view just set', () => {
+    const { client, canvas, answer } = setup();
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(100);
+    answer({ metric: 'size' });
+    expect(client.layoutMetric).toBe('size');
+    client.setView({ ...view(), metric: 'matches' });
+    vi.advanceTimersByTime(100);
+    expect(client.layoutMetric).toBe('size');
+    answer({ metric: 'matches' });
+    expect(client.layoutMetric).toBe('matches');
   });
 
   it('reports the worker timings with the time it took to build the hit index', () => {

@@ -46,6 +46,8 @@ export type FromWorker =
       type: 'layout';
       sequence: number;
       layout: Layout;
+      /** The metric the layout's weights are in, which the view may have moved on from. */
+      metric: Metric;
       crumbs: Crumb[];
       zoomFolderId: number;
       painted: boolean;

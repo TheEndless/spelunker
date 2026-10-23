@@ -110,8 +110,14 @@
   // ---- legend filter
 
   const layout = $derived(client.layout);
+  /**
+   * The weights of the layout on screen are in the metric it was made with. Right after a switch
+   * the `metric` prop has moved on while that layout is still shown, so text about its weights
+   * (the summary, the legend totals, the group tooltips) reads them in this one instead.
+   */
+  const layoutMetric = $derived(client.layoutMetric);
   const hasRectangles = $derived(layout !== null && layout.count > 0);
-  const legend = $derived(layout ? legendEntries(layout, colorMode, colors, metric) : []);
+  const legend = $derived(layout ? legendEntries(layout, colorMode, colors, layoutMetric) : []);
 
   /** The buckets the user picked in the legend. A choice is kept per color mode, since buckets differ. */
   let legendFilter = $state.raw<{ mode: ColorMode; buckets: ReadonlySet<number> }>({ mode: 'type', buckets: NOTHING_DIMMED });
@@ -138,7 +144,7 @@
     }
   });
   // Shown even when nothing has area, since it then says how many files have no weight in this view.
-  const summary = $derived(layout && layout.totalFiles > 0 ? summaryText(layout, metric, client.largestFolder) : '');
+  const summary = $derived(layout && layout.totalFiles > 0 ? summaryText(layout, layoutMetric, client.largestFolder) : '');
 
   // ---- setup
 
@@ -328,10 +334,10 @@
         if (token !== describeToken) return;
         describedFolderId = folderId;
         describedPath = path;
-        if (hoverRect === rect && pointerInside) tooltipText = groupTooltip(fileCount, weight, metric, path);
+        if (hoverRect === rect && pointerInside) tooltipText = groupTooltip(fileCount, weight, layoutMetric, path);
       });
     }
-    return groupTooltip(fileCount, weight, metric, folderId === describedFolderId ? describedPath : '');
+    return groupTooltip(fileCount, weight, layoutMetric, folderId === describedFolderId ? describedPath : '');
   }
 
   /** Pointer position relative to the stage, read once per event. */
@@ -553,7 +559,7 @@
       return;
     }
     hoverRect = rect;
-    announce(groupTooltip(current.fileCount[rect], current.weight[rect], metric, '').title);
+    announce(groupTooltip(current.fileCount[rect], current.weight[rect], layoutMetric, '').title);
   }
 
   function onStageKeydown(event: KeyboardEvent) {

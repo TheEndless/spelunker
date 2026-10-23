@@ -1,6 +1,6 @@
 import type { SearchSession, SessionListener } from './search.svelte';
 import { LayoutIndex } from './treemapIndex';
-import type { Layout } from './treemapLayout';
+import type { Layout, Metric } from './treemapLayout';
 import type { Crumb, FromWorker, Located, ToWorker, ViewSettings } from './treemapMessages';
 import type { TreemapRecord } from './treemapTree';
 import type { DisplayRow } from './types';
@@ -33,6 +33,8 @@ function createModuleWorker(): WorkerLike {
 /** Feeds the map worker from the search session and holds what it answers as reactive state. */
 export class TreemapClient {
   layout = $state.raw<Layout | null>(null);
+  /** The metric `layout` was made with. Its weights are in this metric until the next layout arrives. */
+  layoutMetric = $state<Metric>('size');
   index = $state.raw<LayoutIndex | null>(null);
   crumbs = $state.raw<Crumb[]>([]);
   largestFolder = $state('');
@@ -214,6 +216,7 @@ export class TreemapClient {
       const index = this.view ? new LayoutIndex(message.layout, this.view.width, this.view.height) : null;
       const indexMs = performance.now() - indexStarted;
       this.layout = message.layout;
+      this.layoutMetric = message.metric;
       this.index = index;
       this.crumbs = message.crumbs;
       this.largestFolder = message.largestFolder;

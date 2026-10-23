@@ -20,12 +20,13 @@ function load(records: TreemapRecord[]) {
   handleMessage({ type: 'add', records }, send);
 }
 
+const view = (zoomFolderId: number | null): ViewSettings => ({
+  width: 100, height: 100, devicePixelRatio: 1, metric: 'size', colorMode: 'type', zoomFolderId,
+  colors: {} as never, forced: null, font: '', dimmed: null,
+});
+
 function layout(zoomFolderId: number | null = null): LayoutReply {
-  const view: ViewSettings = {
-    width: 100, height: 100, devicePixelRatio: 1, metric: 'size', colorMode: 'type', zoomFolderId,
-    colors: {} as never, forced: null, font: '', dimmed: null,
-  };
-  handleMessage({ type: 'layout', sequence: ++sequence, view }, send);
+  handleMessage({ type: 'layout', sequence: ++sequence, view: view(zoomFolderId) }, send);
   return replies.at(-1) as LayoutReply;
 }
 
@@ -72,6 +73,12 @@ describe('treemap worker', () => {
 
     it('falls back to the top for a folder id it does not know', () => {
       expect(layout(999_999).zoomFolderId).toBe(folderId('C:'));
+    });
+
+    it('says which metric the layout was made with', () => {
+      expect(layout().metric).toBe('size');
+      handleMessage({ type: 'layout', sequence: ++sequence, view: { ...view(null), metric: 'matches' } }, send);
+      expect((replies.at(-1) as LayoutReply).metric).toBe('matches');
     });
 
     it('names the heaviest folder directly under the laid-out folder', () => {

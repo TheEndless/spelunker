@@ -126,7 +126,7 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   const layoutMs = performance.now() - layoutStarted - paintMs;
   send(
     {
-      type: 'layout', sequence, layout: trimmed, crumbs, zoomFolderId: root.id, painted,
+      type: 'layout', sequence, layout: trimmed, metric: view.metric, crumbs, zoomFolderId: root.id, painted,
       largestFolder, elapsedMs: { layout: layoutMs, paint: paintMs },
     },
     buffersOf(trimmed),
