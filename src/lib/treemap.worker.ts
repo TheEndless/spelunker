@@ -87,10 +87,13 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   lastZoomRoot = root;
   lastMetric = view.metric;
   // Cushion shading darkens every tile's edges, which keeps neighbours apart, and a background gap
-  // inside each folder would show as a grid of flat lines. Flat fills need the gap.
+  // inside each folder would show as a grid of flat lines. Flat fills need the gap, and so does
+  // forced colors, which ignores the shading setting and outlines each tile alone. Its outlines are
+  // all alike, so the gap between folders is the only thing that shows which files belong together.
+  const cushion = view.shading === 'cushion' && !view.forced;
   const full = layoutTree(root, { files: tree.fileCount, folders: tree.folderCount }, {
     width: view.width, height: view.height, metric: view.metric, now: startedAt,
-    inset: view.shading === 'cushion' ? 0 : undefined,
+    inset: cushion ? 0 : undefined,
   });
 
   let painted = false;

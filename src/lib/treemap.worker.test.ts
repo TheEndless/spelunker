@@ -143,6 +143,14 @@ describe('treemap worker', () => {
       for (const inset of insets) expect(inset).toBeCloseTo(1, 5);
     });
 
+    it('keeps the one-pixel gap under forced colors even with cushion chosen, since outlines alone show the folders', () => {
+      const forced = { ...view(null, 'cushion'), forced: { canvas: '#000000', text: '#FFFFFF', highlight: '#00FFFF' } };
+      handleMessage({ type: 'layout', sequence: ++sequence, view: forced }, send);
+      const insets = insetsOf(replies.at(-1) as LayoutReply);
+      expect(insets).toHaveLength(4);
+      for (const inset of insets) expect(inset).toBeCloseTo(1, 5);
+    });
+
     it('paints with the painter the shading names', () => {
       const painted = (shading: Shading) => {
         const { canvas, calls } = recordingCanvas();
