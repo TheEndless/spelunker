@@ -10,6 +10,7 @@ export type IconName =
     | 'help'
     | 'columns'
     | 'export'
+    | 'map'
     | 'chevron-down'
     | 'chevron-up'
     | 'chevron-left'
@@ -64,6 +65,8 @@ export type IconName =
     help: 'M8 14.25a6.25 6.25 0 1 0 0-12.5 6.25 6.25 0 0 0 0 12.5z M6.2 6.2a1.9 1.9 0 1 1 2.7 1.7c-.6.3-.9.7-.9 1.4 M8 11.4v.1',
     columns: 'M2 2.75h12v10.5H2z M6 2.75v10.5 M10 2.75v10.5',
     export: 'M8 10.5V2 M5 4.75L8 1.75l3 3 M2.5 9.5v4h11v-4',
+    // A treemap: one large block on the left, two stacked on the right.
+    map: 'M2 2.75h12v10.5H2z M8.5 2.75v10.5 M8.5 8h5.5',
     'chevron-down': 'M4 6.25l4 4 4-4',
     'chevron-up': 'M4 9.75l4-4 4 4',
     'chevron-left': 'M9.75 4l-4 4 4 4',

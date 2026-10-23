@@ -1,0 +1,116 @@
+import { describe, expect, it } from 'vitest';
+import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
+import { AGE_BUCKET_COUNT, CATEGORY_COUNT } from './treemapLayout';
+import { fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText } from './mapText';
+import type { DisplayRow } from './types';
+
+const colors: MapColors = {
+  background: '#FFFFFF',
+  category: CATEGORY_LABELS.map((_, index) => `#0000${index.toString(16).padStart(2, '0')}`),
+  age: AGE_LABELS.map((_, index) => `#00${index.toString(16).padStart(2, '0')}00`),
+  outlineLight: '#FFFFFF',
+  outlineDark: '#000000',
+};
+
+function weights(count: number, entries: Record<number, number>): Float64Array {
+  const values = new Float64Array(count);
+  for (const [bucket, weight] of Object.entries(entries)) values[Number(bucket)] = weight;
+  return values;
+}
+
+describe('formatWeight', () => {
+  it('formats sizes as bytes and matches as a count', () => {
+    expect(formatWeight(2048, 'size')).toBe('2.0 KB');
+    expect(formatWeight(25, 'matches')).toBe('25 matches');
+    expect(formatWeight(1, 'matches')).toBe('1 match');
+  });
+});
+
+describe('summaryText', () => {
+  it('summarizes size', () => {
+    expect(summaryText({ totalFiles: 142, totalWeight: 3.1 * 1024 ** 3, omitted: 0 }, 'size', 'Logs')).toBe(
+      '142 files, 3.1 GB, largest folder Logs',
+    );
+  });
+
+  it('summarizes matches and mentions files without weight', () => {
+    expect(summaryText({ totalFiles: 10, totalWeight: 25, omitted: 2 }, 'matches', '')).toBe(
+      '10 files, 25 matches, 2 without weight in this view',
+    );
+  });
+
+  it('groups thousands and uses the singular for one file', () => {
+    expect(summaryText({ totalFiles: 100_000, totalWeight: 0, omitted: 0 }, 'size', '')).toBe('100,000 files, 0 B');
+    expect(summaryText({ totalFiles: 1, totalWeight: 512, omitted: 0 }, 'size', 'src')).toBe('1 file, 512 B, largest folder src');
+  });
+});
+
+describe('legendEntries', () => {
+  const empty = { categoryWeight: new Float64Array(CATEGORY_COUNT), ageWeight: new Float64Array(AGE_BUCKET_COUNT) };
+
+  it('lists only the legend entries that have weight, largest first', () => {
+    const layout = { ...empty, categoryWeight: weights(CATEGORY_COUNT, { 1: 5, [CATEGORY_COUNT - 1]: 3 }) };
+    expect(legendEntries(layout, 'type', colors, 'matches')).toEqual([
+      { bucket: 1, label: CATEGORY_LABELS[1], color: colors.category[1], total: '5 matches' },
+      {
+        bucket: CATEGORY_COUNT - 1,
+        label: CATEGORY_LABELS[CATEGORY_COUNT - 1],
+        color: colors.category[CATEGORY_COUNT - 1],
+        total: '3 matches',
+      },
+    ]);
+  });
+
+  it('uses the age buckets in Age mode', () => {
+    const layout = { ...empty, ageWeight: weights(AGE_BUCKET_COUNT, { 0: 1024, 4: 4096 }) };
+    expect(legendEntries(layout, 'age', colors, 'size')).toEqual([
+      { bucket: 4, label: AGE_LABELS[4], color: colors.age[4], total: '4.0 KB' },
+      { bucket: 0, label: AGE_LABELS[0], color: colors.age[0], total: '1.0 KB' },
+    ]);
+  });
+
+  it('keeps the bucket order for equal weights', () => {
+    const layout = { ...empty, categoryWeight: weights(CATEGORY_COUNT, { 2: 7, 0: 7 }) };
+    expect(legendEntries(layout, 'type', colors, 'size').map((entry) => entry.bucket)).toEqual([0, 2]);
+  });
+
+  it('is empty when nothing has weight', () => {
+    expect(legendEntries(empty, 'type', colors, 'size')).toEqual([]);
+  });
+});
+
+describe('tooltips', () => {
+  const row: DisplayRow = {
+    id: 7,
+    path: 'C:\\logs\\app.log',
+    name: 'app.log',
+    folder: 'C:\\logs',
+    size: 2048,
+    hits: 3,
+    modifiedMs: null,
+    modifiedText: '22/10/2026 09:15',
+    typeName: 'Text Document',
+  };
+
+  it('describes a file with its folder, size, matches, modified time and type', () => {
+    expect(fileTooltip(row)).toEqual({
+      title: 'app.log',
+      lines: ['C:\\logs', 'Size 2.0 KB', '3 matches', 'Modified 22/10/2026 09:15', 'Text Document'],
+    });
+  });
+
+  it('leaves out matches, an unknown time and an unknown type', () => {
+    expect(fileTooltip({ ...row, hits: 0, modifiedText: '', typeName: '' })).toEqual({
+      title: 'app.log',
+      lines: ['C:\\logs', 'Size 2.0 KB'],
+    });
+  });
+
+  it('describes a group of small files by count and total, with its folder', () => {
+    expect(groupTooltip(12, 4096, 'size', 'C:\\logs\\old')).toEqual({
+      title: '12 small files, 4.0 KB',
+      lines: ['C:\\logs\\old'],
+    });
+    expect(groupTooltip(1, 2, 'matches', '')).toEqual({ title: '1 small file, 2 matches', lines: [] });
+  });
+});
