@@ -1,4 +1,4 @@
-import { contrast, fromOklab, mix, normalizeHex, oklab, perceptualDistance } from './colors';
+import { channels, contrast, fromOklab, mix, normalizeHex, oklab, perceptualDistance, toHex } from './colors';
 import type { Mode, Tokens } from './palettes';
 import { loneRidgeMeanBrightness, shadeChannel } from './treemapCushion';
 
@@ -63,9 +63,7 @@ export function labelColorOn(base: string, leftBrightness: number, rightBrightne
 }
 
 function shadeBase(base: string, brightness: number): string {
-  const hex = normalizeHex(base);
-  const shaded = [1, 3, 5].map((start) => shadeChannel(parseInt(hex.slice(start, start + 2), 16), brightness).toString(16).padStart(2, '0'));
-  return `#${shaded.join('')}`.toUpperCase();
+  return toHex(channels(base).map((channel) => shadeChannel(channel, brightness)));
 }
 
 /** Whether a label on the shaded mean of `base` reaches the text contrast. Fills in a thin middle band fail it with both text colors. */

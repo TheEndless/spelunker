@@ -1,5 +1,6 @@
 // The worker paints with this module too. textFit only touches the document in canvasMeasurer,
 // which is not used here, so it is safe to load in a worker.
+import { channels } from './colors';
 import { fitMiddle } from './textFit';
 import { labelColorOn, type ForcedColors, type MapColors } from './treemapColors';
 import { brightnessAt, brightnessOfNormal, shadeChannel, surfaceNormal } from './treemapCushion';
@@ -57,19 +58,26 @@ function fittedLabel(
   return fitMiddle(nameOf(rect), rectWidth - 2 * LABEL_LEFT, measure);
 }
 
-/** Paints with cushion lighting or flat fills by `style.shading`. Forced colors always gets the outline-only painter. */
+/**
+ * Paints with cushion lighting or flat fills by `style.shading`. Forced colors always gets the
+ * outline-only painter. A flat paint lets go of the cushion image, so only cushion shading keeps
+ * an image the size of the canvas alive between paints.
+ */
 export function paintMap(
   context: Context2D,
   layout: Layout,
   width: number,
   height: number,
-  devicePixelRatio: number,
   style: PaintStyle,
   dimmed: ReadonlySet<number> | null,
   nameOf: ((rect: number) => string) | null,
 ): void {
-  if (style.forced || style.shading === 'flat') paintLayout(context, layout, width, height, style, dimmed, nameOf);
-  else paintCushion(context, layout, width, height, devicePixelRatio, style, dimmed, nameOf);
+  if (style.forced || style.shading === 'flat') {
+    releaseCushionImage();
+    paintLayout(context, layout, width, height, style, dimmed, nameOf);
+  } else {
+    paintCushion(context, layout, width, height, style, dimmed, nameOf);
+  }
 }
 
 export function paintLayout(
@@ -151,9 +159,9 @@ function cushionImageOfSize(context: Context2D, width: number, height: number): 
   return cushionImage;
 }
 
-/** [red, green, blue] of a #RRGGBB color. */
-function channelsOf(hex: string): number[] {
-  return [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16));
+function releaseCushionImage(): void {
+  cushionImage = null;
+  cushionPixels = new Uint32Array(0);
 }
 
 /** An opaque pixel as one little-endian Uint32: red in the low byte, alpha in the high one. */
@@ -175,7 +183,7 @@ function writePixel(pixels: Uint32Array, bytes: Uint8ClampedArray, index: number
 }
 
 /**
- * Paints the layout with cushion lighting into `context` at `devicePixelRatio`. Works in whole device
+ * Paints the layout with cushion lighting into `context` at `style.pixelRatio`. Works in whole device
  * pixels with one reused ImageData (the context's transform and globalAlpha do not apply to putImageData),
  * then draws labels with the transform. `dimmed` and `nameOf` behave as in paintLayout.
  */
@@ -184,11 +192,11 @@ export function paintCushion(
   layout: Layout,
   width: number,
   height: number,
-  devicePixelRatio: number,
   style: PaintStyle,
   dimmed: ReadonlySet<number> | null,
   nameOf: ((rect: number) => string) | null,
 ): void {
+  const devicePixelRatio = style.pixelRatio;
   const bufferWidth = Math.round(width * devicePixelRatio);
   const bufferHeight = Math.round(height * devicePixelRatio);
   // An empty image cannot be created, and there is nothing to show.
@@ -200,8 +208,8 @@ export function paintCushion(
   const { colors, colorMode } = style;
   const fills = colorMode === 'type' ? colors.category : colors.age;
   const buckets = colorMode === 'type' ? layout.category : layout.age;
-  const fillChannels = fills.map(channelsOf);
-  const [backgroundRed, backgroundGreen, backgroundBlue] = channelsOf(colors.background);
+  const fillChannels = fills.map(channels);
+  const [backgroundRed, backgroundGreen, backgroundBlue] = channels(colors.background);
   if (LITTLE_ENDIAN) pixels.fill(packedPixel(backgroundRed, backgroundGreen, backgroundBlue));
   else for (let index = 0; index < bufferWidth * bufferHeight; index++) writePixel(pixels, bytes, index, backgroundRed, backgroundGreen, backgroundBlue);
   // A dimmed pixel is the background at 1 - alpha plus the shaded color at alpha, as flat mode's fade looks.
@@ -232,12 +240,12 @@ export function paintCushion(
 
     // The coefficients are in CSS pixels, so each device pixel is sampled at its center in CSS pixels.
     const offset = i * 4;
-    const sx1 = surface[offset];
-    const sx2 = surface[offset + 1];
-    const sy1 = surface[offset + 2];
-    const sy2 = surface[offset + 3];
-    for (let column = firstColumn; column < right; column++) columnNormals[column] = surfaceNormal(sx1, sx2, (column + 0.5) / devicePixelRatio);
-    for (let row = firstRow; row < bottom; row++) rowNormals[row] = surfaceNormal(sy1, sy2, (row + 0.5) / devicePixelRatio);
+    const linearX = surface[offset];
+    const quadraticX = surface[offset + 1];
+    const linearY = surface[offset + 2];
+    const quadraticY = surface[offset + 3];
+    for (let column = firstColumn; column < right; column++) columnNormals[column] = surfaceNormal(linearX, quadraticX, (column + 0.5) / devicePixelRatio);
+    for (let row = firstRow; row < bottom; row++) rowNormals[row] = surfaceNormal(linearY, quadraticY, (row + 0.5) / devicePixelRatio);
 
     for (let row = firstRow; row < bottom; row++) {
       const normalY = rowNormals[row];

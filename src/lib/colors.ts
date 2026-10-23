@@ -7,12 +7,14 @@ export function normalizeHex(color: string): string {
   throw new Error(`Not a hex color: "${color}"`);
 }
 
-function channels(color: string): [number, number, number] {
+/** [red, green, blue] of a #RGB or #RRGGBB color, each 0 to 255. */
+export function channels(color: string): [number, number, number] {
   const hex = normalizeHex(color);
   return [1, 3, 5].map((start) => parseInt(hex.slice(start, start + 2), 16)) as [number, number, number];
 }
 
-function toHex([red, green, blue]: number[]): string {
+/** The #RRGGBB form of [red, green, blue], each rounded and held to 0 to 255. */
+export function toHex([red, green, blue]: number[]): string {
   return (
     '#' +
     [red, green, blue]

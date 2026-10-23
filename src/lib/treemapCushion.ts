@@ -61,7 +61,8 @@ export function brightnessAt(sx1: number, sx2: number, sy1: number, sy2: number,
  * `base * brightness` rounded half up and clamped to 0..255. The painter calls this for every channel of
  * every pixel, and `(value + 0.5) | 0` is about twice as fast there as Math.round with Math.min and
  * Math.max. The bounds are checked first, so `| 0` never sees a value it would wrap. The two agree
- * everywhere except a product within one rounding step under 0.5, which this rounds to 1.
+ * everywhere except two cases. A product within one rounding step under 0.5 rounds to 1 here. A NaN
+ * product gives 0 here, where the Math form would give NaN.
  */
 export function shadeChannel(base: number, brightness: number): number {
   const scaled = base * brightness;
