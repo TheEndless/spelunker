@@ -8,6 +8,8 @@ import type { DisplayRow } from './types';
 /** How often a running search is re-laid-out. The same pace as the column refit. */
 export const LAYOUT_INTERVAL_MS = 1200;
 const VIEW_CHANGE_DELAY_MS = 50;
+/** The most records in one `add`, so no single structured clone blocks the page for long. */
+export const ADD_CHUNK_SIZE = 10_000;
 
 export interface WorkerLike {
   postMessage(message: unknown, transfer?: Transferable[]): void;
@@ -63,12 +65,18 @@ export class TreemapClient {
     private readonly session: Pick<SearchSession, 'rows' | 'running' | 'subscribe'>,
     private readonly createWorker: () => WorkerLike = createModuleWorker,
   ) {
+    // While attached, changes wait for the next layout so each tick sends one batch. While
+    // detached they go straight to the worker, which keeps its tree current without laying out.
     const listener: SessionListener = {
       appended: (rows) => {
-        if (this.worker) this.pendingAdds.push(...rows.map(toRecord));
+        if (!this.worker) return;
+        for (const row of rows) this.pendingAdds.push(toRecord(row));
+        if (!this.attached) this.flushChanges();
       },
       removed: (id) => {
-        if (this.worker) this.pendingRemoves.push(id);
+        if (!this.worker) return;
+        this.pendingRemoves.push(id);
+        if (!this.attached) this.flushChanges();
       },
       reset: (startedAtMs) => {
         this.startedAtMs = startedAtMs;
@@ -89,7 +97,7 @@ export class TreemapClient {
       this.worker = this.createWorker();
       this.worker.onmessage = (event) => this.receive(event.data as FromWorker);
       this.post({ type: 'reset', now: this.startedAtMs ?? Date.now() });
-      this.post({ type: 'add', records: this.session.rows.map(toRecord) });
+      this.postAdds(this.session.rows.map(toRecord));
     }
     const supportsOffscreen = typeof canvas.transferControlToOffscreen === 'function';
     this.workerPaints = supportsOffscreen;
@@ -103,11 +111,12 @@ export class TreemapClient {
     this.scheduleLayout();
   }
 
-  /** Stops laying out and painting. The worker keeps its tree, and session changes keep queueing for the next attach. */
+  /** Stops laying out and painting. The worker keeps its tree, and session changes keep reaching it. */
   detach(): void {
     this.attached = false;
     clearInterval(this.tickTimer);
     clearTimeout(this.viewTimer);
+    this.flushChanges();
   }
 
   setView(view: Omit<ViewSettings, 'zoomFolderId'>): void {
@@ -154,14 +163,7 @@ export class TreemapClient {
 
   private requestLayout(): void {
     if (!this.attached || !this.view || !this.worker) return;
-    if (this.pendingAdds.length > 0) {
-      this.post({ type: 'add', records: this.pendingAdds });
-      this.pendingAdds = [];
-    }
-    if (this.pendingRemoves.length > 0) {
-      this.post({ type: 'remove', ids: this.pendingRemoves });
-      this.pendingRemoves = [];
-    }
+    this.flushChanges();
     const sequence = ++this.sequence;
     this.viewVersionOfSequence.set(sequence, this.viewVersion);
     this.busy = true;
@@ -197,6 +199,22 @@ export class TreemapClient {
       this.waiting.set(requestId, resolve);
       this.post({ ...question, requestId });
     });
+  }
+
+  /** Sends the queued additions and removals to the worker. */
+  private flushChanges(): void {
+    this.postAdds(this.pendingAdds);
+    this.pendingAdds = [];
+    if (this.pendingRemoves.length > 0) {
+      this.post({ type: 'remove', ids: this.pendingRemoves });
+      this.pendingRemoves = [];
+    }
+  }
+
+  private postAdds(records: TreemapRecord[]): void {
+    for (let start = 0; start < records.length; start += ADD_CHUNK_SIZE) {
+      this.post({ type: 'add', records: records.slice(start, start + ADD_CHUNK_SIZE) });
+    }
   }
 
   private post(message: ToWorker, transfer: Transferable[] = []): void {

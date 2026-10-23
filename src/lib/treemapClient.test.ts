@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TreemapClient, type WorkerLike } from './treemapClient.svelte';
+import { ADD_CHUNK_SIZE, TreemapClient, type WorkerLike } from './treemapClient.svelte';
 import type { SessionListener } from './search.svelte';
 import type { DisplayRow } from './types';
 
@@ -128,6 +128,44 @@ describe('TreemapClient', () => {
     emit().appended([row(9)]);
     vi.advanceTimersByTime(5000);
     expect(types(posted)).not.toContain('layout');
+  });
+
+  it('posts the first resync in chunks before any layout', () => {
+    const { client, session, posted, canvas } = setup();
+    session.rows = Array.from({ length: 25_000 }, (_, id) => row(id));
+    client.setView(view());
+    client.attach(canvas);
+    expect(types(posted)).toEqual(['reset', 'add', 'add', 'add', 'attach']);
+    const sizes = posted.filter((entry) => entry.message.type === 'add').map((entry) => entry.message.records.length);
+    expect(sizes).toEqual([ADD_CHUNK_SIZE, ADD_CHUNK_SIZE, 5_000]);
+  });
+
+  it('forwards changes while detached without laying out', () => {
+    const { client, posted, canvas, emit } = setup();
+    client.setView(view());
+    client.attach(canvas);
+    vi.advanceTimersByTime(100);
+    emit().appended([row(2)]);
+    posted.length = 0;
+    client.detach();
+    expect(types(posted)).toEqual(['add']);
+    posted.length = 0;
+    emit().appended([row(3)]);
+    emit().removed(0);
+    expect(types(posted)).toEqual(['add', 'remove']);
+    vi.advanceTimersByTime(5000);
+    expect(types(posted)).not.toContain('layout');
+  });
+
+  it('does not post old rows again when re-attached', () => {
+    const { client, posted, canvas } = setup();
+    client.setView(view());
+    client.attach(canvas);
+    client.detach();
+    posted.length = 0;
+    client.attach({ transferControlToOffscreen: () => ({}) } as unknown as HTMLCanvasElement);
+    vi.advanceTimersByTime(100);
+    expect(types(posted)).toEqual(['attach', 'layout']);
   });
 
   it('terminates the worker on dispose', () => {

@@ -2,28 +2,34 @@
 // program, and the webworker lib redeclares DOM globals (`self`, `onmessage`, `postMessage`). The
 // DOM lib already declares OffscreenCanvas and performance, so only the scope needs a type.
 import { bestTextOn } from './colors';
-import { layoutTree, RectKind, type Layout } from './treemapLayout';
+import { layoutTree, RectKind, type Layout, type Metric } from './treemapLayout';
 import type { Crumb, FromWorker, ToWorker, ViewSettings } from './treemapMessages';
 import { paintLayout, type PaintStyle } from './treemapPaint';
 import { ancestorsOf, collapseChain, folderPathLabel, FolderTree, type FolderNode } from './treemapTree';
+
+/** Posts a reply to the page, handing over the listed buffers. */
+export type Send = (message: FromWorker, transfer?: Transferable[]) => void;
 
 /** The parts of the dedicated worker scope this file uses. */
 interface WorkerScope {
   postMessage(message: FromWorker, transfer: Transferable[]): void;
   onmessage: ((event: MessageEvent<ToWorker>) => void) | null;
 }
-const scope = self as unknown as WorkerScope;
 
 const tree = new FolderTree();
 let startedAt = Date.now();
 let context: OffscreenCanvasRenderingContext2D | null = null;
 let offscreen: OffscreenCanvas | null = null;
-/** Rectangle lookups kept after the layout arrays are transferred away. */
+// Rectangle lookups from the last layout, kept after its arrays are transferred away.
 let lastFileRects = new Map<number, number>();
-let lastFolderRects = new Map<number, number>();
+/** FolderBlock rectangles, keyed by the folder drawn as the block. */
+let lastBlockRects = new Map<number, number>();
+/** SmallFiles rectangles, keyed by the folder whose items were folded into the group. */
+let lastGroupRects = new Map<number, number>();
+/** Folders that were framed and filled, so each of their items is drawn on its own or in their group. */
+let lastFramedFolders = new Set<number>();
 let lastZoomRoot: FolderNode = tree.root;
-
-const send = (message: FromWorker, transfer: Transferable[] = []) => scope.postMessage(message, transfer);
+let lastMetric: Metric = 'size';
 
 /** A copy of the layout with each typed array cut to the entries in use, so only those cross to the page. */
 function trim(layout: Layout): Layout {
@@ -46,14 +52,23 @@ function buffersOf(layout: Layout): ArrayBuffer[] {
     .map((view) => view.buffer as ArrayBuffer);
 }
 
+const isInTree = (node: FolderNode) => tree.folderById(node.id) === node;
+
 /**
- * The folder to lay out: the zoom target if it still exists, else the tree's top (a removed folder
- * zooms the map out). Single-child chains are skipped, so the result is always the tree's top or
- * something below it.
+ * The folder to lay out: the zoom target if it still exists, else (when the target was the last
+ * folder laid out and has since been pruned) its nearest surviving ancestor, else the tree's top.
+ * Pruned folders keep their parent links and folder ids are never reused, so the walk is safe.
+ * Single-child chains are skipped, so the result is always the tree's top or something below it.
  */
 function resolveRoot(zoomFolderId: number | null): FolderNode {
-  const zoomed = zoomFolderId === null ? undefined : tree.folderById(zoomFolderId);
-  return collapseChain(zoomed ?? tree.root);
+  if (zoomFolderId === null) return collapseChain(tree.root);
+  let node = tree.folderById(zoomFolderId);
+  if (!node && lastZoomRoot.id === zoomFolderId) {
+    let ancestor: FolderNode | null = lastZoomRoot.parent;
+    while (ancestor && !isInTree(ancestor)) ancestor = ancestor.parent;
+    node = ancestor ?? undefined;
+  }
+  return collapseChain(node ?? tree.root);
 }
 
 /** The path from the tree's top (labelled with its whole collapsed path) down to the laid-out folder. */
@@ -65,10 +80,11 @@ function crumbsFor(root: FolderNode): Crumb[] {
   return crumbs;
 }
 
-function layoutAndPaint(sequence: number, view: ViewSettings) {
+function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   const layoutStarted = performance.now();
   const root = resolveRoot(view.zoomFolderId);
   lastZoomRoot = root;
+  lastMetric = view.metric;
   const full = layoutTree(root, { files: tree.fileCount, folders: tree.folderCount }, {
     width: view.width, height: view.height, metric: view.metric, now: startedAt,
   });
@@ -89,11 +105,15 @@ function layoutAndPaint(sequence: number, view: ViewSettings) {
 
   // Remember how to find a file's rectangle after the arrays are handed to the page.
   lastFileRects = new Map();
-  lastFolderRects = new Map();
+  lastBlockRects = new Map();
+  lastGroupRects = new Map();
+  lastFramedFolders = new Set();
   for (let i = 0; i < full.count; i++) {
     if (full.kind[i] === RectKind.File) lastFileRects.set(full.id[i], i);
-    else lastFolderRects.set(full.id[i], i);
+    else if (full.kind[i] === RectKind.FolderBlock) lastBlockRects.set(full.id[i], i);
+    else lastGroupRects.set(full.id[i], i);
   }
+  for (let i = 0; i < full.frameCount; i++) lastFramedFolders.add(full.frameFolderId[i]);
 
   // `trimmed` owns fresh copies of the per-rectangle arrays, but its summary arrays are shared with
   // `full`. Nothing below this point reads either layout, so transferring all of their buffers is safe.
@@ -113,7 +133,7 @@ function nameOfRect(layout: Layout, rect: number): string {
 }
 
 /** The name of the subfolder of `root` that carries the most weight, or empty when it has none. */
-function largestFolderName(root: FolderNode, metric: ViewSettings['metric']): string {
+function largestFolderName(root: FolderNode, metric: Metric): string {
   const weightOfFolder = (node: FolderNode): number => {
     let sum = 0;
     for (const file of node.files) sum += metric === 'size' ? file.size : file.hits;
@@ -132,31 +152,28 @@ function largestFolderName(root: FolderNode, metric: ViewSettings['metric']): st
   return best ? best.name : '';
 }
 
-function locate(requestId: number, fileId: number) {
-  const direct = lastFileRects.get(fileId);
-  if (direct !== undefined) {
-    send({ type: 'located', requestId, rect: direct, zoomFolderId: null });
-    return;
-  }
+function locate(requestId: number, fileId: number, send: Send) {
+  const answer = (rect: number, zoomFolderId: number | null) => send({ type: 'located', requestId, rect, zoomFolderId });
   const folder = tree.folderOfFile(fileId);
-  if (!folder) {
-    send({ type: 'located', requestId, rect: -1, zoomFolderId: null });
-    return;
-  }
-  // A file folded into a small-files group, or inside a folder drawn as one block, is shown by
-  // that group or block. Look from its own folder up to the top.
-  const lookup = [...ancestorsOf(folder), tree.root];
-  for (const candidate of lookup) {
-    const rect = lastFolderRects.get(candidate.id);
-    if (rect !== undefined) {
-      send({ type: 'located', requestId, rect, zoomFolderId: null });
-      return;
-    }
+  const file = folder?.files.find((candidate) => candidate.id === fileId);
+  // A removed file, or one with no weight under the metric last laid out, is not drawn anywhere.
+  if (!folder || !file || (lastMetric === 'size' ? file.size : file.hits) <= 0) return answer(-1, null);
+  const direct = lastFileRects.get(fileId);
+  if (direct !== undefined) return answer(direct, null);
+  if (lastFramedFolders.size === 0) return answer(-1, null);
+
+  // Walk up from the file's folder. A folder drawn as one block shows everything inside it. The
+  // first framed folder on the way was filled, so the file (or the unframed folder the walk came
+  // up from) was folded into that folder's own small-files group.
+  for (let current: FolderNode | null = folder; current; current = current.parent) {
+    const block = lastBlockRects.get(current.id);
+    if (block !== undefined) return answer(block, null);
+    if (lastFramedFolders.has(current.id)) return answer(lastGroupRects.get(current.id) ?? -1, null);
   }
   // Not in the zoomed view: ask the page to zoom out to the nearest folder above the file that
   // also lies above (or is) the folder now shown.
-  const common = lookup.find((candidate) => isAncestorOrSelf(candidate, lastZoomRoot)) ?? tree.root;
-  send({ type: 'located', requestId, rect: -1, zoomFolderId: common.id });
+  const common = [...ancestorsOf(folder), tree.root].find((candidate) => isAncestorOrSelf(candidate, lastZoomRoot)) ?? tree.root;
+  answer(-1, common.id);
 }
 
 /** Whether `candidate` is `node` or one of its ancestors. */
@@ -165,8 +182,8 @@ function isAncestorOrSelf(candidate: FolderNode, node: FolderNode): boolean {
   return false;
 }
 
-scope.onmessage = (event) => {
-  const message = event.data;
+/** Applies one message from the page. Exported so tests can drive the worker without a worker scope. */
+export function handleMessage(message: ToWorker, send: Send): void {
   switch (message.type) {
     case 'attach':
       offscreen = message.canvas;
@@ -176,7 +193,9 @@ scope.onmessage = (event) => {
       tree.clear();
       startedAt = message.now;
       lastFileRects = new Map();
-      lastFolderRects = new Map();
+      lastBlockRects = new Map();
+      lastGroupRects = new Map();
+      lastFramedFolders = new Set();
       lastZoomRoot = tree.root;
       break;
     case 'add':
@@ -186,10 +205,10 @@ scope.onmessage = (event) => {
       for (const id of message.ids) tree.remove(id);
       break;
     case 'layout':
-      layoutAndPaint(message.sequence, message.view);
+      layoutAndPaint(message.sequence, message.view, send);
       break;
     case 'locate':
-      locate(message.requestId, message.fileId);
+      locate(message.requestId, message.fileId, send);
       break;
     case 'describe': {
       const node = tree.folderById(message.folderId);
@@ -197,4 +216,10 @@ scope.onmessage = (event) => {
       break;
     }
   }
-};
+}
+
+// Only a worker scope has WorkerGlobalScope, so importing this module in a test wires nothing up.
+if ('WorkerGlobalScope' in globalThis) {
+  const scope = self as unknown as WorkerScope;
+  scope.onmessage = (event) => handleMessage(event.data, (message, transfer = []) => scope.postMessage(message, transfer));
+}
