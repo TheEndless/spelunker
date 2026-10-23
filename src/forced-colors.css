@@ -116,32 +116,36 @@
     border: 1px solid CanvasText !important;
   }
 
-  /* The results map. Its canvas draws in system colors itself, so these cover the controls around it. */
-  .modes button:disabled,
-  .tool:disabled,
+  /*
+   * The results map and the status bar's Map button. The canvas draws in system colors itself, so
+   * these cover the controls around it. Every rule is scoped to the map or that button, so the same
+   * class names elsewhere (.tool, .modes) look as they did before the map.
+   */
+  .map .modes button:disabled,
+  .map .tool:disabled,
   .map-toggle[aria-disabled='true'] {
     color: GrayText !important;
     border-color: GrayText !important;
   }
-  .entry,
+  .map .entry,
   .map-toggle {
     border: 1px solid ButtonText !important;
   }
-  .entry[aria-pressed='true'],
+  .map .entry[aria-pressed='true'],
   .map-toggle[aria-pressed='true'] {
     outline: 2px solid Highlight !important;
     outline-offset: -2px;
   }
-  .stage:focus-visible {
+  .map .stage:focus-visible {
     outline: 2px solid Highlight !important;
     outline-offset: -2px;
   }
-  .tooltip {
+  .map .tooltip {
     background: Canvas !important;
     color: CanvasText !important;
     border: 1px solid CanvasText !important;
   }
-  .tooltip strong {
+  .map .tooltip strong {
     color: CanvasText !important;
   }
 }
