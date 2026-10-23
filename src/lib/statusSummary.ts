@@ -5,7 +5,8 @@ export interface FindCounts {
   totalHits: number;
 }
 
-const count = (value: number, singular: string, pluralForm: string): string =>
+/** "1 file", "100,000 files". Pinned to en-US so the grouping matches the rest of the English UI. */
+export const count = (value: number, singular: string, pluralForm: string): string =>
   `${value.toLocaleString('en-US')} ${value === 1 ? singular : pluralForm}`;
 
 /**

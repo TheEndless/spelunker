@@ -87,6 +87,28 @@ describe('TreemapClient', () => {
     expect(types(posted)).toEqual(['reset']);
   });
 
+  it('forgets the previous search picture on a reset and takes the next one', () => {
+    const { client, worker, posted, canvas, emit } = setup();
+    client.attach(canvas);
+    client.setView(view());
+    vi.advanceTimersByTime(100);
+    worker.onmessage!({ data: { ...layoutReply(1), crumbs: [{ folderId: 0, label: 'C:' }], largestFolder: 'a' } } as MessageEvent);
+    expect(client.layout).not.toBeNull();
+
+    emit().reset(789);
+    expect(client.layout).toBeNull();
+    expect(client.index).toBeNull();
+    expect(client.crumbs).toEqual([]);
+    expect(client.largestFolder).toBe('');
+    expect(client.lastTimings).toBeNull();
+
+    vi.advanceTimersByTime(100);
+    const sequence = posted.map((entry) => entry.message).filter((message) => message.type === 'layout').at(-1).sequence;
+    worker.onmessage!({ data: layoutReply(sequence) } as MessageEvent);
+    expect(client.layout).not.toBeNull();
+    expect(client.index).not.toBeNull();
+  });
+
   it('ignores a layout reply older than the latest request', () => {
     const { client, worker, canvas } = setup();
     client.attach(canvas);

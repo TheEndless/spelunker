@@ -83,6 +83,12 @@ export class TreemapClient {
         this.pendingAdds = [];
         this.pendingRemoves = [];
         this.zoomFolderId = null;
+        // The old picture names rows that no longer exist. The view and the attachment stay.
+        this.layout = null;
+        this.index = null;
+        this.crumbs = [];
+        this.largestFolder = '';
+        this.lastTimings = null;
         this.viewVersion++;
         this.post({ type: 'reset', now: startedAtMs });
         this.scheduleLayout();

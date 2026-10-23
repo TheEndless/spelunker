@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
 import { AGE_BUCKET_COUNT, CATEGORY_COUNT } from './treemapLayout';
-import { fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText } from './mapText';
+import { effectiveFilter, fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText } from './mapText';
 import type { DisplayRow } from './types';
 
 const colors: MapColors = {
@@ -41,6 +41,9 @@ describe('summaryText', () => {
 
   it('groups thousands and uses the singular for one file', () => {
     expect(summaryText({ totalFiles: 100_000, totalWeight: 0, omitted: 0 }, 'size', '')).toBe('100,000 files, 0 B');
+    expect(summaryText({ totalFiles: 2, totalWeight: 3, omitted: 12_345 }, 'matches', '')).toBe(
+      '2 files, 3 matches, 12,345 without weight in this view',
+    );
     expect(summaryText({ totalFiles: 1, totalWeight: 512, omitted: 0 }, 'size', 'src')).toBe('1 file, 512 B, largest folder src');
   });
 });
@@ -76,6 +79,27 @@ describe('legendEntries', () => {
 
   it('is empty when nothing has weight', () => {
     expect(legendEntries(empty, 'type', colors, 'size')).toEqual([]);
+  });
+});
+
+describe('effectiveFilter', () => {
+  const present = (...buckets: number[]) => buckets.map((bucket) => ({ bucket }));
+
+  it('drops a chosen bucket that is no longer in the legend', () => {
+    expect([...effectiveFilter(new Set([3]), present(0, 1))]).toEqual([]);
+  });
+
+  it('keeps the chosen buckets that are still present', () => {
+    expect([...effectiveFilter(new Set([1, 3, 5]), present(5, 0, 1))]).toEqual([1, 5]);
+  });
+
+  it('means nothing dimmed when nothing chosen is present', () => {
+    expect(effectiveFilter(new Set([7]), present(1)).size).toBe(0);
+    expect(effectiveFilter(new Set(), present(1)).size).toBe(0);
+  });
+
+  it('keeps the order the buckets were chosen in', () => {
+    expect([...effectiveFilter(new Set([4, 2, 9]), present(2, 4, 9))]).toEqual([4, 2, 9]);
   });
 });
 

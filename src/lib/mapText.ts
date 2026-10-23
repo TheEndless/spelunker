@@ -2,10 +2,8 @@ import { formatSize, modifiedLabel } from './format';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
 import type { Layout, Metric } from './treemapLayout';
 import type { ColorMode } from './treemapPaint';
+import { count as counted } from './statusSummary';
 import type { DisplayRow } from './types';
-
-const counted = (count: number, singular: string, plural: string) =>
-  `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
 
 /** A total in the map's current metric: bytes for Size, a match count for Matches. */
 export function formatWeight(weight: number, metric: Metric): string {
@@ -20,7 +18,7 @@ export function summaryText(
 ): string {
   const parts = [counted(layout.totalFiles, 'file', 'files'), formatWeight(layout.totalWeight, metric)];
   if (largestFolder !== '') parts.push(`largest folder ${largestFolder}`);
-  if (layout.omitted > 0) parts.push(`${layout.omitted.toLocaleString()} without weight in this view`);
+  if (layout.omitted > 0) parts.push(`${layout.omitted.toLocaleString('en-US')} without weight in this view`);
   return parts.join(', ');
 }
 
@@ -55,6 +53,17 @@ export function legendEntries(
     color: fills[bucket],
     total: formatWeight(weight, metric),
   }));
+}
+
+/**
+ * The legend buckets that really pick something out: the user's choices that are still in the
+ * legend. A choice whose bucket left the view (a zoom, a metric switch, a new search) would
+ * otherwise dim the whole map with no pressed button left to clear it. Empty means nothing dimmed.
+ */
+export function effectiveFilter(chosen: ReadonlySet<number>, present: readonly { bucket: number }[]): Set<number> {
+  const result = new Set<number>();
+  for (const bucket of chosen) if (present.some((entry) => entry.bucket === bucket)) result.add(bucket);
+  return result;
 }
 
 export interface TooltipText {

@@ -18,7 +18,7 @@
   import { bestTextOn } from './colors';
   import { formatSize } from './format';
   import Icon from './Icon.svelte';
-  import { fileTooltip, groupTooltip, legendEntries, summaryText, type TooltipText } from './mapText';
+  import { effectiveFilter, fileTooltip, groupTooltip, legendEntries, summaryText, type TooltipText } from './mapText';
   import { tokensFor, type Mode } from './palettes';
   import { findRowIndex } from './rowLookup';
   import type { SearchSession } from './search.svelte';
@@ -109,9 +109,20 @@
 
   // ---- legend filter
 
-  /** The buckets the legend has picked out. The rest are dimmed. A filter is kept per color mode, since buckets differ. */
+  const layout = $derived(client.layout);
+  const hasRectangles = $derived(layout !== null && layout.count > 0);
+  const legend = $derived(layout ? legendEntries(layout, colorMode, colors, metric) : []);
+
+  /** The buckets the user picked in the legend. A choice is kept per color mode, since buckets differ. */
   let legendFilter = $state.raw<{ mode: ColorMode; buckets: ReadonlySet<number> }>({ mode: 'type', buckets: NOTHING_DIMMED });
-  const shownBuckets = $derived(legendFilter.mode === colorMode ? legendFilter.buckets : NOTHING_DIMMED);
+  const chosenBuckets = $derived(legendFilter.mode === colorMode ? legendFilter.buckets : NOTHING_DIMMED);
+  /** The choices still in the legend. Everything else is dimmed, and an empty set dims nothing. */
+  const shownBuckets = $derived(effectiveFilter(chosenBuckets, legend));
+  /**
+   * The same set as a string, which compares by value. The set is rebuilt with every layout, and
+   * sending the worker a "new" filter each time would start another layout, endlessly.
+   */
+  const shownKey = $derived([...shownBuckets].join(','));
 
   function toggleBucket(bucket: number) {
     const buckets = new Set(shownBuckets);
@@ -120,9 +131,12 @@
     legendFilter = { mode: colorMode, buckets };
   }
 
-  const layout = $derived(client.layout);
-  const hasRectangles = $derived(layout !== null && layout.count > 0);
-  const legend = $derived(layout ? legendEntries(layout, colorMode, colors, metric) : []);
+  // Choices that have all left the view are dropped, so they cannot come back to dim a later view.
+  $effect(() => {
+    if (chosenBuckets.size > 0 && shownBuckets.size === 0) {
+      untrack(() => (legendFilter = { mode: colorMode, buckets: NOTHING_DIMMED }));
+    }
+  });
   // Shown even when nothing has area, since it then says how many files have no weight in this view.
   const summary = $derived(layout && layout.totalFiles > 0 ? summaryText(layout, metric, client.largestFolder) : '');
 
@@ -180,7 +194,7 @@
       colors,
       forced,
       font,
-      dimmed: shownBuckets.size > 0 ? [...shownBuckets] : null,
+      dimmed: shownKey === '' ? null : shownKey.split(',').map(Number),
     };
     untrack(() => client.setView(view));
   });
