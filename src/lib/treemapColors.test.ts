@@ -3,7 +3,7 @@ import { contrast, oklab, perceptualDistance } from './colors';
 import { FILE_CATEGORIES } from './fileKinds';
 import { PALETTES, type Mode } from './palettes';
 import { shadeChannel, loneRidgeMeanBrightness } from './treemapCushion';
-import { AGE_LABELS, CATEGORY_LABELS, labelColorOn, mapColors, shadedMean } from './treemapColors';
+import { AGE_LABELS, ageRampShape, CATEGORY_LABELS, labelColorOn, mapColors, shadedMean } from './treemapColors';
 import { AGE_BUCKET_COUNT } from './treemapLayout';
 
 const HEX = /^#[0-9A-F]{6}$/;
@@ -104,6 +104,20 @@ describe('mapColors', () => {
   it('has a label for every category and age bucket', () => {
     expect(CATEGORY_LABELS).toHaveLength(FILE_CATEGORIES.length);
     expect(AGE_LABELS).toHaveLength(AGE_BUCKET_COUNT);
+  });
+});
+
+describe('ageRampShape', () => {
+  it('turns the age ramp\'s hue only for Nord dark and One dark, by the spans and Older chromas the comment names', () => {
+    const turned: Record<string, { hueSpanDegrees: number; oldChroma: number }> = {};
+    for (const palette of PALETTES) {
+      for (const mode of ['light', 'dark'] as Mode[]) {
+        const tokens = palette[mode];
+        const shape = ageRampShape(tokens.accent, mapColors(tokens, mode).background, mode);
+        if (shape.hueSpanDegrees !== 0) turned[`${palette.id} ${mode}`] = shape;
+      }
+    }
+    expect(turned).toEqual({ 'nord dark': { hueSpanDegrees: -95, oldChroma: 0.1 }, 'one dark': { hueSpanDegrees: 5, oldChroma: 0.07 } });
   });
 });
 

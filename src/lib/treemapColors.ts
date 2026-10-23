@@ -115,7 +115,9 @@ function ensureFill(base: string, background: string, mode: Mode, carriesLabel: 
 
 export function mapColors(tokens: Tokens, mode: Mode): MapColors {
   const background = normalizeHex(tokens.surface);
-  const baseLightness = mode === 'dark' ? 0.6 : 0.42;
+  // The light search starts high and darkens only until a fill passes, so light fills land just past
+  // the 3:1 base rule (about 3.0 to 3.9:1) instead of far darker than the dark map's.
+  const baseLightness = mode === 'dark' ? 0.6 : 0.72;
   const searchDirection = mode === 'dark' ? 1 : -1;
   const category = CATEGORY_HUES.map((hue, index) => {
     const saturation = index === OTHER_INDEX ? 0.08 : CATEGORY_SATURATION;
@@ -132,8 +134,13 @@ export function mapColors(tokens: Tokens, mode: Mode): MapColors {
   return { background, category, age: ageRamp(tokens.accent, background, mode), outlineLight: '#FFFFFF', outlineDark: '#000000' };
 }
 
-/** OKLab lightness of the Today color: deep on a light map, bright on a dark one, so it stands out most. */
-const RECENT_LIGHTNESS: Record<Mode, number> = { light: 0.33, dark: 0.96 };
+/**
+ * OKLab lightness of the Today color: deep on a light map, bright on a dark one, so it stands out most.
+ * A lighter light Today leaves less room before Older. At 0.37 and 0.38 Tokyo night light has to
+ * turn its ramp (5 and 10 degrees), and at 0.40 or above Nord, Solarized, Tokyo night and Verdigris
+ * turn by 27 to 70 degrees and look garish, so 0.36 is the lightest that keeps every light ramp one hue.
+ */
+const RECENT_LIGHTNESS: Record<Mode, number> = { light: 0.36, dark: 0.96 };
 const RECENT_CHROMA_MIN = 0.1;
 const RECENT_CHROMA_MAX = 0.16;
 /** The Older color keeps only a trace of the accent's hue, so it stays muted. */
@@ -146,10 +153,10 @@ const MIN_AGE_STEP = 0.06;
  * hue from Today to Older, by the smallest of these spans that works, trying each span in both
  * directions, and then to keep a little more chroma at Older, smallest first.
  * RAMP_HUE_SPAN_STEP_DEGREES and RAMP_HUE_SPAN_MAX_DEGREES bound that search.
- * Measured palettes that needed it (every other palette and mode keeps the single-hue ramp):
- * Nord dark turns the hue 95 degrees (-95) and keeps Older chroma 0.10, and One dark turns 5 degrees
- * (+5) with Older chroma 0.07. Nord dark could not be made valid with Older chroma at or under 0.05
- * at any span up to 180 degrees, so its Older is more vivid than the others.
+ * The palettes that need it, pinned by the ageRampShape test (every other palette and mode keeps the
+ * single-hue ramp): Nord dark turns the hue 95 degrees (-95) and keeps Older chroma 0.10, and One
+ * dark turns 5 degrees (+5) with Older chroma 0.07. Nord dark could not be made valid with Older
+ * chroma at or under 0.05 at any span up to 180 degrees, so its Older is more vivid than the others.
  */
 const RAMP_HUE_SPAN_STEP_DEGREES = 5;
 const RAMP_HUE_SPAN_MAX_DEGREES = 180;
@@ -174,13 +181,23 @@ const DATED_BUCKETS = 5;
  * Ramps that cannot be made valid fall back to the single-hue ramp and the age tests report them.
  */
 function ageRamp(accent: string, background: string, mode: Mode): string[] {
-  const plain = rampFor(accent, background, mode, 0, OLD_CHROMA);
-  if (rampIsValid(plain, background, mode)) return plain;
+  const { hueSpanDegrees, oldChroma } = ageRampShape(accent, background, mode);
+  return rampFor(accent, background, mode, hueSpanDegrees, oldChroma);
+}
+
+/**
+ * How far the age ramp turns its hue from Today to Older, and the chroma it keeps at Older: no turn
+ * and OLD_CHROMA when the single-hue ramp is valid or when nothing is. Exported so a test can pin
+ * which palettes turn.
+ */
+export function ageRampShape(accent: string, background: string, mode: Mode): { hueSpanDegrees: number; oldChroma: number } {
+  const plain = { hueSpanDegrees: 0, oldChroma: OLD_CHROMA };
+  if (rampIsValid(rampFor(accent, background, mode, 0, OLD_CHROMA), background, mode)) return plain;
   for (let degrees = RAMP_HUE_SPAN_STEP_DEGREES; degrees <= RAMP_HUE_SPAN_MAX_DEGREES; degrees += RAMP_HUE_SPAN_STEP_DEGREES) {
     for (const oldChroma of OLD_CHROMA_OPTIONS) {
       for (const direction of [-1, 1]) {
-        const turned = rampFor(accent, background, mode, direction * degrees, oldChroma);
-        if (rampIsValid(turned, background, mode)) return turned;
+        const hueSpanDegrees = direction * degrees;
+        if (rampIsValid(rampFor(accent, background, mode, hueSpanDegrees, oldChroma), background, mode)) return { hueSpanDegrees, oldChroma };
       }
     }
   }
