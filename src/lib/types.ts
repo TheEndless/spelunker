@@ -11,6 +11,8 @@ export interface ResultRow {
 
 /** A row plus the pieces derived once on arrival, so sorting and rendering stay cheap. */
 export interface DisplayRow extends ResultRow {
+  /** Unique for the life of the session and never reused, so other views can refer to a row after others are removed. */
+  id: number;
   name: string;
   folder: string;
 }

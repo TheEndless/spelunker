@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SearchRequest } from './backend';
-import type { SearchMessage } from './types';
+import type { ResultRow, SearchMessage } from './types';
 
 const backend = vi.hoisted(() => ({
   emit: null as null | ((message: SearchMessage) => void),
@@ -63,6 +63,86 @@ function startedSession() {
   session.start(request);
   return session;
 }
+
+function resultRow(path: string): ResultRow {
+  return { path, size: 1, modifiedMs: null, modifiedText: '', hits: 0, typeName: 'File' };
+}
+
+function batchOf(...paths: string[]): SearchMessage {
+  return { kind: 'batch', rows: paths.map(resultRow), errors: [], filesScanned: null };
+}
+
+describe('row ids and session events', () => {
+  it('gives every accepted row a unique, increasing id', () => {
+    const session = startedSession();
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    backend.emit!(batchOf('C:/x/c', 'C:/x/d'));
+    expect(session.rows.map((row) => row.id)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('does not give an id to a duplicate path', () => {
+    const session = startedSession();
+    const appendedBatches: number[][] = [];
+    session.subscribe({
+      appended: (rows) => appendedBatches.push(rows.map((row) => row.id)),
+      removed: () => {},
+      reset: () => {},
+    });
+    backend.emit!(batchOf('C:/x/a'));
+    backend.emit!(batchOf('C:/x/a'));
+    expect(session.rows).toHaveLength(1);
+    expect(appendedBatches).toEqual([[0]]);
+  });
+
+  it('finds a row by id and forgets it after removal', () => {
+    const session = startedSession();
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    const row = session.rowById(1);
+    expect(row?.path).toBe('C:/x/b');
+    session.removeRow(row!.path);
+    expect(session.rowById(1)).toBeUndefined();
+    expect(session.rowById(0)?.path).toBe('C:/x/a');
+  });
+
+  it('tells listeners about appended rows, removals and resets in order', () => {
+    const session = new SearchSession();
+    const events: string[] = [];
+    const stop = session.subscribe({
+      appended: (rows) => events.push(`appended:${rows.map((row) => row.id).join(',')}`),
+      removed: (id) => events.push(`removed:${id}`),
+      reset: () => events.push('reset'),
+    });
+    session.start(request);
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    session.removeRow('C:/x/a');
+    session.start(request);
+    expect(events).toEqual(['reset', 'appended:0,1', 'removed:0', 'reset']);
+
+    stop();
+    backend.emit!(batchOf('C:/x/c'));
+    session.start(request);
+    expect(events).toHaveLength(4);
+  });
+
+  it('passes the start time to reset listeners', () => {
+    vi.setSystemTime(123_456);
+    const session = new SearchSession();
+    const startTimes: number[] = [];
+    session.subscribe({ appended: () => {}, removed: () => {}, reset: (ms) => startTimes.push(ms) });
+    session.start(request);
+    expect(startTimes).toEqual([123_456]);
+  });
+
+  it('keeps ids unique across searches', () => {
+    const session = startedSession();
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    const firstSearchIds = session.rows.map((row) => row.id);
+    session.start(request);
+    backend.emit!(batchOf('C:/x/a'));
+    expect(session.rows[0].id).toBeGreaterThan(Math.max(...firstSearchIds));
+    expect(session.rowById(firstSearchIds[0])).toBeUndefined();
+  });
+});
 
 describe('stopping a search', () => {
   it('marks the session as stopping right away and tells the backend once', () => {

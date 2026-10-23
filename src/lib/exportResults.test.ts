@@ -3,6 +3,7 @@ import { exportFileName, formatResults } from './exportResults';
 import type { DisplayRow } from './types';
 
 const row = (overrides: Partial<DisplayRow>): DisplayRow => ({
+  id: 0,
   path: 'C:\\data\\notes.txt',
   name: 'notes.txt',
   folder: 'C:\\data',

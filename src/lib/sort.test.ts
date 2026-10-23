@@ -4,6 +4,7 @@ import type { DisplayRow } from './types';
 
 function row(name: string, overrides: Partial<DisplayRow> = {}): DisplayRow {
   return {
+    id: 0,
     path: `C:\\d\\${name}`,
     name,
     folder: 'C:\\d',

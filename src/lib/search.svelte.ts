@@ -12,8 +12,17 @@ import type {
   Summary,
 } from './types';
 
-function toDisplayRow(row: ResultRow): DisplayRow {
-  return { ...row, ...splitPath(row.path) };
+export interface SessionListener {
+  /** Rows accepted from a batch, in arrival order, already carrying their ids. */
+  appended(rows: DisplayRow[]): void;
+  /** A row left the results (for example its file was deleted). */
+  removed(id: number): void;
+  /** A new search started. `startedAtMs` is the reference time for ages. */
+  reset(startedAtMs: number): void;
+}
+
+function toDisplayRow(row: ResultRow, id: number): DisplayRow {
+  return { ...row, ...splitPath(row.path), id };
 }
 
 /** Live state of the current (or most recent) search. */
@@ -48,15 +57,29 @@ export class SearchSession {
 
   private runId = 0;
   private seenPaths = new Set<string>();
+  private nextRowId = 0;
+  private rowsById = new Map<number, DisplayRow>();
+  private listeners = new Set<SessionListener>();
   private startedAt = 0;
   private timer: ReturnType<typeof setInterval> | undefined;
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  rowById(id: number): DisplayRow | undefined {
+    return this.rowsById.get(id);
+  }
+
+  subscribe(listener: SessionListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
 
   start(request: SearchRequest) {
     const runId = ++this.runId;
     this.clearStopping();
     this.rows = [];
     this.seenPaths = new Set();
+    this.rowsById = new Map();
+    for (const listener of this.listeners) listener.reset(Date.now());
     this.errors = [];
     this.filesScanned = 0;
     this.elapsedMs = 0;
@@ -89,6 +112,11 @@ export class SearchSession {
 
   /** Takes a row out of the results, for example after its file was deleted from the system menu. */
   removeRow(path: string) {
+    const removed = this.rows.find((row) => row.path === path);
+    if (removed) {
+      this.rowsById.delete(removed.id);
+      for (const listener of this.listeners) listener.removed(removed.id);
+    }
     this.rows = this.rows.filter((row) => row.path !== path);
     this.seenPaths.delete(path);
   }
@@ -118,7 +146,12 @@ export class SearchSession {
         this.seenPaths.add(row.path);
         return true;
       });
-      if (fresh.length > 0) this.rows = this.rows.concat(fresh.map(toDisplayRow));
+      if (fresh.length > 0) {
+        const accepted = fresh.map((row) => toDisplayRow(row, this.nextRowId++));
+        for (const row of accepted) this.rowsById.set(row.id, row);
+        this.rows = this.rows.concat(accepted);
+        for (const listener of this.listeners) listener.appended(accepted);
+      }
       if (message.errors.length > 0) this.errors = this.errors.concat(message.errors);
       if (message.filesScanned !== null) this.filesScanned = message.filesScanned;
       return;
