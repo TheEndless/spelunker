@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
-import { AGE_BUCKET_COUNT, CATEGORY_COUNT } from './treemapLayout';
+import { AGE_BUCKET_COUNT, CATEGORY_COUNT, RectKind } from './treemapLayout';
 import { effectiveFilter, fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText } from './mapText';
 import type { DisplayRow } from './types';
 
@@ -35,14 +35,17 @@ describe('summaryText', () => {
 
   it('summarizes matches and mentions files without weight', () => {
     expect(summaryText({ totalFiles: 10, totalWeight: 25, omitted: 2 }, 'matches', '')).toBe(
-      '10 files, 25 matches, 2 without weight in this view',
+      '10 files, 25 matches, 2 files have no weight in this view',
+    );
+    expect(summaryText({ totalFiles: 10, totalWeight: 25, omitted: 1 }, 'matches', '')).toBe(
+      '10 files, 25 matches, 1 file has no weight in this view',
     );
   });
 
   it('groups thousands and uses the singular for one file', () => {
     expect(summaryText({ totalFiles: 100_000, totalWeight: 0, omitted: 0 }, 'size', '')).toBe('100,000 files, 0 B');
     expect(summaryText({ totalFiles: 2, totalWeight: 3, omitted: 12_345 }, 'matches', '')).toBe(
-      '2 files, 3 matches, 12,345 without weight in this view',
+      '2 files, 3 matches, 12,345 files have no weight in this view',
     );
     expect(summaryText({ totalFiles: 1, totalWeight: 512, omitted: 0 }, 'size', 'src')).toBe('1 file, 512 B, largest folder src');
   });
@@ -64,11 +67,13 @@ describe('legendEntries', () => {
     ]);
   });
 
-  it('uses the age buckets in Age mode', () => {
-    const layout = { ...empty, ageWeight: weights(AGE_BUCKET_COUNT, { 0: 1024, 4: 4096 }) };
+  it('uses the age buckets in Age mode, newest first whatever their totals', () => {
+    const layout = { ...empty, ageWeight: weights(AGE_BUCKET_COUNT, { 0: 1024, 4: 4096, 5: 8192, 2: 512 }) };
     expect(legendEntries(layout, 'age', colors, 'size')).toEqual([
-      { bucket: 4, label: AGE_LABELS[4], color: colors.age[4], total: '4.0 KB' },
       { bucket: 0, label: AGE_LABELS[0], color: colors.age[0], total: '1.0 KB' },
+      { bucket: 2, label: AGE_LABELS[2], color: colors.age[2], total: '512 B' },
+      { bucket: 4, label: AGE_LABELS[4], color: colors.age[4], total: '4.0 KB' },
+      { bucket: 5, label: AGE_LABELS[5], color: colors.age[5], total: '8.0 KB' },
     ]);
   });
 
@@ -131,10 +136,18 @@ describe('tooltips', () => {
   });
 
   it('describes a group of small files by count and total, with its folder', () => {
-    expect(groupTooltip(12, 4096, 'size', 'C:\\logs\\old')).toEqual({
+    expect(groupTooltip(RectKind.SmallFiles, 12, 4096, 'size', 'C:\\logs\\old')).toEqual({
       title: '12 small files, 4.0 KB',
       lines: ['C:\\logs\\old'],
     });
-    expect(groupTooltip(1, 2, 'matches', '')).toEqual({ title: '1 small file, 2 matches', lines: [] });
+    expect(groupTooltip(RectKind.SmallFiles, 1, 2, 'matches', '')).toEqual({ title: '1 small file, 2 matches', lines: [] });
+  });
+
+  it('describes a folder drawn as one block by its files, which need not be small', () => {
+    expect(groupTooltip(RectKind.FolderBlock, 12, 4096, 'size', 'C:\\logs\\old')).toEqual({
+      title: '12 files, 4.0 KB',
+      lines: ['C:\\logs\\old'],
+    });
+    expect(groupTooltip(RectKind.FolderBlock, 1, 2, 'matches', '')).toEqual({ title: '1 file, 2 matches', lines: [] });
   });
 });

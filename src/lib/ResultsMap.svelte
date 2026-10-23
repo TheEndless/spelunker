@@ -325,6 +325,7 @@
       return row ? fileTooltip(row) : null;
     }
     // A group's id is the folder it belongs to, and a block's id is the folder it stands for.
+    const kind = current.kind[rect];
     const folderId = current.id[rect];
     const fileCount = current.fileCount[rect];
     const weight = current.weight[rect];
@@ -334,10 +335,10 @@
         if (token !== describeToken) return;
         describedFolderId = folderId;
         describedPath = path;
-        if (hoverRect === rect && pointerInside) tooltipText = groupTooltip(fileCount, weight, layoutMetric, path);
+        if (hoverRect === rect && pointerInside) tooltipText = groupTooltip(kind, fileCount, weight, layoutMetric, path);
       });
     }
-    return groupTooltip(fileCount, weight, layoutMetric, folderId === describedFolderId ? describedPath : '');
+    return groupTooltip(kind, fileCount, weight, layoutMetric, folderId === describedFolderId ? describedPath : '');
   }
 
   /** Pointer position relative to the stage, read once per event. */
@@ -559,7 +560,7 @@
       return;
     }
     hoverRect = rect;
-    announce(groupTooltip(current.fileCount[rect], current.weight[rect], layoutMetric, '').title);
+    announce(groupTooltip(current.kind[rect], current.fileCount[rect], current.weight[rect], layoutMetric, '').title);
   }
 
   function onStageKeydown(event: KeyboardEvent) {

@@ -1,6 +1,6 @@
 import { formatSize, modifiedLabel } from './format';
 import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
-import type { Layout, Metric } from './treemapLayout';
+import { RectKind, type Layout, type Metric } from './treemapLayout';
 import type { ColorMode } from './treemapPaint';
 import { count as counted } from './statusSummary';
 import type { DisplayRow } from './types';
@@ -18,7 +18,10 @@ export function summaryText(
 ): string {
   const parts = [counted(layout.totalFiles, 'file', 'files'), formatWeight(layout.totalWeight, metric)];
   if (largestFolder !== '') parts.push(`largest folder ${largestFolder}`);
-  if (layout.omitted > 0) parts.push(`${layout.omitted.toLocaleString('en-US')} without weight in this view`);
+  if (layout.omitted > 0) {
+    const verb = layout.omitted === 1 ? 'has' : 'have';
+    parts.push(`${counted(layout.omitted, 'file', 'files')} ${verb} no weight in this view`);
+  }
   return parts.join(', ');
 }
 
@@ -30,7 +33,10 @@ export interface LegendEntry {
   total: string;
 }
 
-/** The categories or age buckets present in the view, heaviest first. */
+/**
+ * The categories or age buckets present in the view. Categories come heaviest first. Age buckets
+ * keep their own order, Today to Unknown, since a scale read out of order means nothing.
+ */
 export function legendEntries(
   layout: Pick<Layout, 'categoryWeight' | 'ageWeight'>,
   colorMode: ColorMode,
@@ -46,7 +52,7 @@ export function legendEntries(
     if (weights[bucket] > 0) present.push({ bucket, weight: weights[bucket] });
   }
   // The sort is stable, so equal weights keep the bucket order.
-  present.sort((left, right) => right.weight - left.weight);
+  if (byType) present.sort((left, right) => right.weight - left.weight);
   return present.map(({ bucket, weight }) => ({
     bucket,
     label: labels[bucket],
@@ -80,10 +86,15 @@ export function fileTooltip(row: DisplayRow): TooltipText {
   return { title: row.name, lines };
 }
 
-/** A small-files group or a folder drawn as one block. `folderPath` is empty until the worker has named it. */
-export function groupTooltip(fileCount: number, weight: number, metric: Metric, folderPath: string): TooltipText {
+/**
+ * A small-files group or a folder drawn as one block, by its RectKind. A block's files are only
+ * too many to draw at this size, not small, so they are called files. `folderPath` is empty until
+ * the worker has named it.
+ */
+export function groupTooltip(kind: number, fileCount: number, weight: number, metric: Metric, folderPath: string): TooltipText {
+  const files = kind === RectKind.SmallFiles ? counted(fileCount, 'small file', 'small files') : counted(fileCount, 'file', 'files');
   return {
-    title: `${counted(fileCount, 'small file', 'small files')}, ${formatWeight(weight, metric)}`,
+    title: `${files}, ${formatWeight(weight, metric)}`,
     lines: folderPath === '' ? [] : [folderPath],
   };
 }
