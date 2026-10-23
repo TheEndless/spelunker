@@ -38,6 +38,7 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Filters when needed.** Size, modified date, created date, and a name regex, in a panel that stays closed until you need it, with a badge counting what is active.
 - **Search everywhere.** Pick any folders, or choose **This PC (all drives)** to search every local fixed drive.
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
+- **Results map.** A treemap below the results shows where your matches are: rectangle area is file size or match count, color is file type or age. It fills in as the search runs, click a rectangle to select the file, Ctrl+click to zoom into its folder, and `Ctrl+Shift+M` hides it.
 - **Real Windows integration.** Right-click a result for the genuine Windows context menu, with Spelunker's own entries (open containing folder, copy path, copy name, copy matching lines) on top. Right-click a folder, a drive, or **This PC** in Explorer and choose **Search with Spelunker**.
 - **Your columns, your way.** Resize, reorder, show or hide columns, and let them fill the window automatically. Dates follow your Windows regional format.
 - **12 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows.
@@ -81,6 +82,7 @@ Name, content, and filters combine with AND.
 | `Ctrl+E` | Export results (CSV or plain text) |
 | `F6` / `Shift+F6` | Next / previous pane |
 | `Ctrl+Shift+P` | Show or hide the preview |
+| `Ctrl+Shift+M` | Show or hide the results map |
 | `Ctrl+,` | Settings |
 | `F1` | All shortcuts |
 
@@ -111,7 +113,7 @@ To work on the interface alone, in a plain browser with fake data:
 npm run dev            # http://localhost:5173
 ```
 
-Typing `many` as the search text streams 100,000 fake rows for visual checks.
+Typing `many` as the search text streams 100,000 fake rows for visual checks, and `deep` streams 100,000 rows in a deep, uneven folder tree for the results map.
 
 ## Test
 

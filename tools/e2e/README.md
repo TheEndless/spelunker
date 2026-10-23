@@ -10,7 +10,8 @@ the system menu were verified. They assume the repository is at `D:\Development\
 2. Start the app with the debug port open: `pwsh tools/e2e/launch.ps1` (it builds the debug exe first).
 3. Make the sample files once: `cd tools/e2e && node fixtures.mjs`.
 
-Run the scripts from `tools/e2e`.
+Run the scripts from `tools/e2e`. The headless suites (`fill.mjs`, and `ux7.mjs` without `--real`) need
+only step 1: they start their own headless Edge through `headless.mjs` and stop it when they finish.
 
 ## Suites
 
@@ -21,6 +22,8 @@ Run the scripts from `tools/e2e`.
 | `node ux3.mjs` | 16 checks: column chooser, hide, drag and keyboard reorder, resize, fit, persistence, reset |
 | `node ux4.mjs` | 27 checks: preview splitter (drag, keys, limits, reset, persistence), collapse and restore, F6 with a hidden preview, columns refitting when the pane or window changes |
 | `node ux5.mjs` | 9 checks: the all-drives button, typing the words, a real search across drives, the launch with "This PC" |
+| `node ux7.mjs [--shots <folder>]` | 40 checks (the 16 numbered items of the results map suite): drawing, Size and Matches, type and age, click and list selection, hover, zoom, map keys, F6, `Ctrl+Shift+M` and the Map button, the map splitter, the shortest window, forced colors, both themes, and the performance budget with every number printed. Runs in headless Edge against the dev server, so it needs no Spelunker window. `--shots` saves screenshots of the deep fixture |
+| `node ux7.mjs --real` | 3 checks (item 17): a real folder search through the actual backend draws the map with real file names. Attaches to the running debug exe |
 | `node fill.mjs` | 8 checks: the columns fill the pane as the window widens, narrows, and the preview hides, in automatic and hand-sized mode. Runs in headless Edge against the dev server, so it needs no Spelunker window |
 | `node previews.mjs <folder>` | Opens each file in a folder and saves a screenshot of the preview pane into `final/` |
 | `node snap.mjs <out.png> [folder] [text] [name]` | Runs a search and saves a page screenshot |
