@@ -320,6 +320,18 @@ pub fn show_shell_menu(
     })
 }
 
+/// Starts a native drag of the files. Refused unless the physical primary mouse button is down
+/// (see `file_drag::start`). A synchronous command, so it runs on the window's thread, which is
+/// where OLE needs the drag to run.
+#[tauri::command]
+pub fn start_file_drag(
+    window: tauri::WebviewWindow,
+    paths: Vec<String>,
+) -> Result<crate::file_drag::DragOutcome, String> {
+    let handle = window.hwnd().map_err(|error| error.to_string())?;
+    crate::file_drag::start(windows::Win32::Foundation::HWND(handle.0), &paths)
+}
+
 /// What the user did in the system menu: chose one of our entries, or the shell carried out one of
 /// its own (which may have deleted or renamed files), or nothing. `skipped` names the requested
 /// paths that no longer existed, which the menu left out.

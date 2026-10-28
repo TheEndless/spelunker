@@ -10,6 +10,7 @@
     revealPath,
     saveTextFile,
     showShellMenu,
+    startFileDrag,
     takeLaunchFolder,
     validateContent,
     validateNameRegex,
@@ -217,6 +218,32 @@
     changeSelection(pruneSelection(selection, session.rows));
   }
 
+  /** Removes the rows of those `candidates` whose files the backend confirms are gone, and returns them. */
+  const removeGone = (candidates: string[]) => removeGoneRows(candidates, existingPaths, removeVanishedRows);
+
+  /** Explorer can finish a dragged move after the drag has returned, so the rows are checked once more after this. */
+  const AFTER_DRAG_RECHECK_MS = 1500;
+
+  /**
+   * Drags files out of the window. A drop target may have moved them, and an optimized move on one
+   * volume reports no effect, so the rows whose files are gone are removed afterwards whatever the
+   * effect says, and once more a little later. A refused or failed drag only says why.
+   */
+  async function dragFilesOut(paths: string[]) {
+    try {
+      const outcome = await startFileDrag(paths);
+      if (!outcome.started) {
+        say('info', outcome.reason ?? 'The drag did not start.');
+        return;
+      }
+    } catch (error) {
+      say('error', String(error));
+      return;
+    }
+    await removeGone(paths);
+    setTimeout(() => void removeGone(paths), AFTER_DRAG_RECHECK_MS);
+  }
+
   const canExport = $derived(!session.running && session.rows.length > 0);
 
   $effect(() => applyTheme(preferences.theme, preferences.palette, preferences.highlightColor));
@@ -415,7 +442,6 @@
     let liveRows = rows;
     const actions = extraActions(rows, () => liveRows);
     const paths = rows.map((chosen) => chosen.path);
-    const removeGone = (candidates: string[]) => removeGoneRows(candidates, existingPaths, removeVanishedRows);
     try {
       const result = await showShellMenu(paths, x, y, actions.map((action) => action.label));
       // The shell left these out of the menu. Some are gone, and others it could not handle (a long
@@ -523,6 +549,7 @@
           onMove={moveCurrentRow}
           onToggleCurrent={toggleCurrentRow}
           onSelectAll={selectAllRows}
+          onDragOut={dragFilesOut}
           onOpen={(row) => openPath(row.path)}
           onContextMenu={showRowMenu}
         />

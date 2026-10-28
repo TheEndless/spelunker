@@ -1,6 +1,7 @@
 // Checks selecting many rows in the results list: the mouse (click, Ctrl, Shift, press and release),
 // the keyboard (Shift, Ctrl, Space, Ctrl+A), what follows the current row (preview, map), the
-// context menu on a selection, Enter, and what clears the selection.
+// context menu on a selection, Enter, what clears the selection, and dragging files out up to the
+// request for the native drag (which the DEV hook answers, so no drag is ever started).
 //
 // node ux8.mjs
 //   Runs in headless Edge against the dev server (start it first: npm run dev). Needs no Spelunker
@@ -17,7 +18,6 @@ const SHIFT = 8;
 const TOTAL_ROWS = 100_000;
 
 const { check, summarize } = createChecker();
-const skip = (name, reason) => console.log(`SKIP  ${name}  (${reason})`);
 const problems = [];
 const onEvent = (event) => {
   if (event.method === 'Runtime.exceptionThrown') {
@@ -313,6 +313,9 @@ async function browserChecks() {
   // ---- the context menu
   await contextMenuChecks();
 
+  // ---- dragging files out
+  await fileDragChecks();
+
   // ---- Ctrl+A in the Containing text box
   await startFrom(2);
   await clickRow(4, SHIFT);
@@ -338,8 +341,6 @@ async function browserChecks() {
   await settle(800);
   const afterSearch = await status();
   check('the new search\'s results come up with nothing selected and an empty preview', (await selected()).length === 0 && (await current()).length === 0 && afterSearch.previewName === 'Preview', { selected: await selected(), preview: afterSearch.previewName });
-
-  skip('removing rows prunes the selection', 'rows are removed only after the system menu ran a shell command, which a plain browser has no way to do, and no DEV probe exposes the session. The pruning rule itself is covered by pruneSelection in selection.test.ts');
 }
 
 /**
@@ -437,6 +438,116 @@ async function contextMenuChecks() {
   await key('Escape');
   check('Escape closes the menu', (await ev('window.__ux8.menu()')) === null);
   check('no Windows menu was asked for (there is none in a plain browser)', (await shellMenuCalls()) === callsBefore, await shellMenuCalls());
+}
+
+const fileDragCalls = () => ev('window.__sp.fileDragCalls');
+const rowCount = () => ev(`Number(document.querySelector('[data-pane="results"] [role=grid]').getAttribute('aria-rowcount')) - 1`);
+
+/**
+ * Presses row `index` and moves the pointer `steps` times by (4, 2) px with the primary button
+ * held, then releases unless told not to. From step `buttonsUpFromStep` on, the moves report no
+ * button held, as when the release happened where the page did not see it.
+ */
+async function dragRow(index, { steps = 6, release = true, buttonsUpFromStep = null } = {}) {
+  const point = await ev(`window.__ux8.rowPoint(${index})`);
+  if (!point) throw new Error(`row ${index} is not on screen`);
+  await mouse('mouseMoved', point.x, point.y);
+  await mouse('mousePressed', point.x, point.y);
+  for (let step = 1; step <= steps; step++) {
+    // The page reports a held left button for any move sent with `button: 'left'` (the helper's
+    // default), whatever `buttons` says, so a move with the button up must name no button.
+    const buttonsUp = buttonsUpFromStep !== null && step >= buttonsUpFromStep;
+    await mouse('mouseMoved', point.x + 4 * step, point.y + 2 * step, buttonsUp ? { buttons: 0, button: 'none' } : { buttons: 1 });
+    await sleep(30);
+  }
+  const end = { x: point.x + 4 * steps, y: point.y + 2 * steps };
+  if (release) await mouse('mouseReleased', end.x, end.y);
+  await sleep(250);
+  return end;
+}
+
+/**
+ * The drag out of the window, up to the request for it. The native drag is never reached: the
+ * DEV hook from PAGE_HELPERS records the request and answers it as a drag that ended with nothing
+ * done. A plain browser has no Tauri bridge at all, so the real command cannot be called here
+ * either. That the page never calls it when the hook is installed is covered in backend.test.ts.
+ */
+async function fileDragChecks() {
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(5, SHIFT);
+  const listRows = await rows();
+  const pathsOf = (indexes) => indexes.map((index) => listRows.find((row) => row.index === index).path);
+
+  const end = await dragRow(3, { release: false });
+  const afterThreshold = await fileDragCalls();
+  check('a press on a selected row, moved past the threshold with the button held, asks for ONE drag of the whole selection in list order', afterThreshold.length === 1 && same(afterThreshold[0].paths, pathsOf([2, 3, 4, 5])), { afterThreshold, wanted: pathsOf([2, 3, 4, 5]) });
+  for (let step = 1; step <= 5; step++) await mouse('mouseMoved', end.x + 10 * step, end.y, { buttons: 1 });
+  await sleep(200);
+  check('moving further during the same press asks for nothing more', (await fileDragCalls()).length === 1, await fileDragCalls());
+  await mouse('mouseReleased', end.x + 50, end.y);
+  await sleep(250);
+  check('the release after the drag does not collapse the selection (rows 2 to 5)', same(await selected(), range(2, 5)), await selected());
+  check('the drag went through the hook alone: no Tauri bridge exists on this page', await ev(`typeof window.__TAURI_INTERNALS__ === 'undefined' && window.__sp.fileDragCalls.length === 1`));
+
+  await clickRow(9);
+  check('a click right after a drag is not swallowed: it selects row 9 alone', same(await selected(), [9]) && same(await current(), [9]), { selected: await selected(), current: await current() });
+
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(4, SHIFT);
+  await dragRow(7);
+  const unselectedDrag = await fileDragCalls();
+  check('a drag from an unselected row carries only that row', unselectedDrag.length === 1 && same(unselectedDrag[0].paths, pathsOf([7])), { unselectedDrag, wanted: pathsOf([7]) });
+  check('and that row is selected alone, as the press selected it', same(await selected(), [7]), await selected());
+
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(5, SHIFT);
+  await clickRow(3);
+  check('a press and release without movement asks for no drag (and collapses to the row)', (await fileDragCalls()).length === 0 && same(await selected(), [3]), { calls: await fileDragCalls(), selected: await selected() });
+
+  await startFrom(2);
+  await clickRow(5, SHIFT);
+  await dragRow(4, { steps: 6, buttonsUpFromStep: 1 });
+  check('a press whose moves report the button up asks for no drag', (await fileDragCalls()).length === 0, await fileDragCalls());
+
+  await dragRow(4, { steps: 8, buttonsUpFromStep: 2, release: false });
+  const point = await ev('window.__ux8.rowPoint(4)');
+  for (let step = 1; step <= 4; step++) await mouse('mouseMoved', point.x + 40 + 10 * step, point.y, { buttons: 1 });
+  await mouse('mouseReleased', point.x + 80, point.y);
+  await sleep(250);
+  check('a press whose button went up mid-way asks for no drag, even when later moves report it down again', (await fileDragCalls()).length === 0, await fileDragCalls());
+
+  await clickRow(6);
+  check('after those presses a plain click selects normally: row 6 alone', same(await selected(), [6]) && same(await current(), [6]), { selected: await selected(), current: await current() });
+
+  await vanishedRowChecks(pathsOf);
+}
+
+/**
+ * After a drag the rows whose files are gone are removed, at once and once more about 1.5 s later
+ * (Explorer can finish a move after the drag returned). The mock reports the paths listed in
+ * `window.__spMockMissingPaths` as gone.
+ */
+async function vanishedRowChecks(pathsOf) {
+  // The later check of the earlier drags must have run before any path is reported gone.
+  await sleep(1600);
+  await startFrom(2);
+  await clickRow(6, SHIFT);
+  const [first, second, late] = pathsOf([3, 5, 6]);
+  const countBefore = await rowCount();
+  await ev(`window.__spMockMissingPaths = ${JSON.stringify([first, second])}`);
+  await dragRow(4);
+  await sleep(300);
+  const shown = (await rows()).map((row) => row.path);
+  check('after a drag, the rows the backend reports gone are removed at once (2 fewer rows, neither path shown)', (await rowCount()) === countBefore - 2 && !shown.includes(first) && !shown.includes(second), { before: countBefore, after: await rowCount() });
+  check('removing rows prunes the selection: the rows that still exist stay selected (the old rows 2, 4 and 6)', (await selected()).length === 3 && (await status()).selection.startsWith('3 selected'), { selected: await selected(), status: (await status()).selection });
+
+  await ev(`window.__spMockMissingPaths = ${JSON.stringify([first, second, late])}`);
+  await sleep(1700);
+  check('and once more about 1.5 s later: a file gone after the drag returned loses its row too', (await rowCount()) === countBefore - 3 && !(await rows()).some((row) => row.path === late), { before: countBefore, after: await rowCount() });
+  await ev('window.__spMockMissingPaths = []');
 }
 
 let edge = null;

@@ -86,6 +86,8 @@ export const PAGE_HELPERS = `
     },
     /** Calls the app made for Windows' own context menu, recorded by the stub below. */
     shellMenuCalls: [],
+    /** Native file drags the app asked for, recorded by the stub below. */
+    fileDragCalls: [],
   };
   // Inside Tauri the row context menu is the native shell menu, which is modal on the app's main
   // thread. A script cannot close it, so the app's test seam answers the request here: the request
@@ -93,5 +95,13 @@ export const PAGE_HELPERS = `
   window.__spShellMenuHook = (request) => {
     window.__sp.shellMenuCalls.push(request);
     return { extra: null, ranShellCommand: false, skipped: [] };
+  };
+  // The native file drag is modal on the main thread too, and one started without a physically
+  // held button would drop wherever the real cursor is. The backend refuses that, and this keeps
+  // every script away from it anyway: the request is recorded and answered as a drag that ended
+  // with nothing done, and the backend is never called.
+  window.__spFileDragHook = (request) => {
+    window.__sp.fileDragCalls.push(request);
+    return { started: true, effect: 'none', skipped: [] };
   };
   true`;

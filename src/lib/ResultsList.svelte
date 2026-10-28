@@ -20,12 +20,13 @@
   import { fitColumnWidth, resizeWithKey } from './columnResize';
   import ContextMenu from './ContextMenu.svelte';
   import type { EmptyState } from './emptyState';
+  import { createDragGesture } from './fileDrag';
   import FileIcon from './FileIcon.svelte';
   import { formatSize, modifiedLabel } from './format';
   import { gridKeyAction, keyboardMenuTarget, modifiersOf, NO_MODIFIERS, type RowPress } from './listSelectionInput';
   import { findRowIndex } from './rowLookup';
   import Icon from './Icon.svelte';
-  import type { Modifiers, SelectionState } from './selection';
+  import { selectedRows, type Modifiers, type SelectionState } from './selection';
   import { canvasMeasurer, fitMiddle } from './textFit';
   import type { DisplayRow, SortColumn, SortDirection } from './types';
   import { visibleWindow } from './virtualList';
@@ -51,8 +52,11 @@
     onMove: (targetIndex: number, modifiers: Modifiers) => void;
     onToggleCurrent: () => void;
     onSelectAll: () => void;
-    /** Hears every row press, for logic that follows the pointer after it (a drag). */
-    onRowPress?: (press: RowPress) => void;
+    /**
+     * A press on a row became a drag of files out of the window: the whole selection in list order
+     * when the pressed row was selected, otherwise just that row. Resolves when the drag has ended.
+     */
+    onDragOut: (paths: string[]) => Promise<void>;
     /** Enter opens the current row, a double-click the clicked one. */
     onOpen: (row: DisplayRow) => void;
     /** The app decides whether the menu applies to the selection or to this row alone. */
@@ -77,7 +81,7 @@
     onMove,
     onToggleCurrent,
     onSelectAll,
-    onRowPress,
+    onDragOut,
     onOpen,
     onContextMenu,
     revealRequest = null,
@@ -455,10 +459,20 @@
 
   /** The last left-button press on a row, until its click. Plain data: nothing renders from it. */
   let rowPress: RowPress | null = null;
+  /** Decides when a press becomes a file drag, and which files it carries. */
+  const fileDrag = createDragGesture({ threshold: DRAG_THRESHOLD });
+  /** Stops following the pointer for the last press, while it is still followed. */
+  let stopFollowingPress: (() => void) | null = null;
 
-  /** Selects at once what a press selects (an unselected row, a Shift range), and watches for a drag. */
+  /**
+   * Selects at once what a press selects (an unselected row, a Shift range), and watches for a drag.
+   * No preventDefault here: `user-select: none` on the rows is what keeps text from being selected.
+   */
   function onRowPointerDown(event: PointerEvent, row: DisplayRow, index: number) {
     if (event.button !== 0) return;
+    // A native drag takes the release, so the page may never have seen the last press end. Whatever
+    // is left of it ends here, so nothing from it outlives into this press.
+    stopFollowingPress?.();
     const press: RowPress = {
       path: row.path,
       index,
@@ -469,20 +483,40 @@
     };
     rowPress = press;
     onPress(row, index, modifiersOf(event));
-    onRowPress?.(press);
+    fileDrag.press({ x: event.clientX, y: event.clientY }, row.path, press.pressedOnSelected, () =>
+      selectedRows(selection, rows).map((selectedRow) => selectedRow.path),
+    );
     const forget = () => {
       if (rowPress === press) rowPress = null;
     };
     const stop = trackPointer(
       (moveEvent) => {
+        const step = fileDrag.move({ x: moveEvent.clientX, y: moveEvent.clientY }, moveEvent.buttons);
         // The button went up where the page did not see it (outside the window, or a modal loop took it).
         if ((moveEvent.buttons & 1) === 0) return stop();
-        if (Math.hypot(moveEvent.clientX - press.startX, moveEvent.clientY - press.startY) >= DRAG_THRESHOLD) press.dragged = true;
+        if (step.kind === 'start') {
+          // The gesture has already forgotten the press, so it cannot start a second drag. The
+          // press no longer ends in a release on its row: it stays only until the page sees the
+          // button up (the release, a move with the button up, or the next press), so a click
+          // that does follow it in a browser does not count as a new press.
+          press.dragged = true;
+          void onDragOut(step.paths);
+        }
       },
       // The row's click follows a release in the same input event, after this. The press is kept for
       // it and forgotten one task later. A cancelled press, or a release the page never saw, has no click.
-      (endEvent) => (endEvent?.type === 'pointerup' ? setTimeout(forget) : forget()),
+      (endEvent) => {
+        if (stopFollowingPress === stop) stopFollowingPress = null;
+        if (endEvent?.type === 'pointerup') {
+          fileDrag.release();
+          setTimeout(forget);
+        } else {
+          fileDrag.cancel();
+          forget();
+        }
+      },
     );
+    stopFollowingPress = stop;
   }
 
   /** Finishes a press with the release rules, unless the press became a drag. */

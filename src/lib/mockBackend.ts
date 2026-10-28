@@ -1,6 +1,13 @@
 // Stand-in backend for viewing the UI in a plain browser (`npm run dev`). Not used inside Tauri.
 import type { ErrorRow, FileText, PreviewLine, QueryOptions, ResultRow, SearchMessage } from './types';
-import type { SearchRequest } from './backend';
+import type { DragOutcome, SearchRequest } from './backend';
+
+declare global {
+  interface Window {
+    /** A test seam: paths the mock reports as gone, so scripts can watch rows of vanished files go. */
+    __spMockMissingPaths?: string[];
+  }
+}
 
 let cancelled = false;
 
@@ -189,6 +196,17 @@ export function validateContent(query: QueryOptions): string | null {
 
 export function validateNameRegex(pattern: string): string | null {
   return describeRegexError(pattern);
+}
+
+/** The fake files never go away, except the ones a script names in `window.__spMockMissingPaths`. */
+export function existingPaths(paths: string[]): string[] {
+  const missing = new Set(typeof window === 'undefined' ? [] : (window.__spMockMissingPaths ?? []));
+  return paths.filter((path) => !missing.has(path));
+}
+
+/** A browser has no native file drag, so the drag ends at once with nothing done. */
+export function startFileDrag(_paths: string[]): DragOutcome {
+  return { started: true, effect: 'none', skipped: [] };
 }
 
 const SAVED_KEY = 'spelunker.mock.saved-searches';

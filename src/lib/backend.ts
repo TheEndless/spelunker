@@ -138,12 +138,12 @@ export async function previewSource(path: string): Promise<string> {
 }
 
 /**
- * The given paths that still exist, used to drop rows after the system menu deleted or renamed
- * files, in the order given. One call checks them all. The browser mock has no files to lose, so
- * every path exists there.
+ * The given paths that still exist, used to drop rows after the system menu or a drag deleted,
+ * renamed or moved files, in the order given. One call checks them all.
  */
 export async function existingPaths(paths: string[]): Promise<string[]> {
-  if (!insideTauri || paths.length === 0) return [...paths];
+  if (paths.length === 0) return [];
+  if (!insideTauri) return (await mock()).existingPaths(paths);
   return invoke<string[]>('existing_paths', { paths });
 }
 
@@ -212,6 +212,11 @@ declare global {
     __spShellMenuHook?: (request: ShellMenuRequest) => ShellMenuResult;
     /** A test seam in development builds. Given the path of each file the app is asked to open, it replaces opening. */
     __spOpenPathHook?: (path: string) => void;
+    /**
+     * A test seam in development builds. The native file drag is modal and would drop wherever the
+     * real cursor is, so end-to-end scripts install this to record the request instead.
+     */
+    __spFileDragHook?: (request: FileDragRequest) => DragOutcome;
   }
 }
 
@@ -227,6 +232,37 @@ export async function showShellMenu(paths: string[], x: number, y: number, extra
   const hook = import.meta.env.DEV ? window.__spShellMenuHook : undefined;
   if (hook) return hook(request);
   return invoke<ShellMenuResult>('show_shell_menu', { paths, x: request.x, y: request.y, extraLabels });
+}
+
+/** How a native file drag ended. */
+export interface DragOutcome {
+  /** False when the drag was refused before it began, with the reason for the user. */
+  started: boolean;
+  effect: 'none' | 'copy' | 'move' | 'link';
+  /** The requested paths that no longer existed, which the drag left out. */
+  skipped: string[];
+  reason?: string;
+}
+
+/** A request for a native file drag, as the DEV hook records it. */
+export interface FileDragRequest {
+  /** Every file the drag carries, in list order. */
+  paths: string[];
+}
+
+/**
+ * Drags `paths` out of the window as files, while the user still holds the mouse button, and
+ * resolves when the drag has ended. The backend refuses (`started: false`) unless the physical
+ * button is really down, because a drag started without it would drop at once wherever the
+ * cursor is.
+ */
+export async function startFileDrag(paths: string[]): Promise<DragOutcome> {
+  // The hook exists only in development builds, where the end-to-end scripts run, and is checked
+  // before anything else so no script can reach the real drag. A release build drops it.
+  const hook = import.meta.env.DEV ? window.__spFileDragHook : undefined;
+  if (hook) return hook({ paths });
+  if (!insideTauri) return (await mock()).startFileDrag(paths);
+  return invoke<DragOutcome>('start_file_drag', { paths });
 }
 
 /** True when the system menu is available, so the app uses it instead of its own list. */

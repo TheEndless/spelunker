@@ -41,6 +41,40 @@ describe('existingPaths inside Tauri', () => {
   });
 });
 
+describe('startFileDrag inside Tauri', () => {
+  const paths = ['C:\\one\\a.txt', 'C:\\two\\b.txt'];
+
+  it('asks the backend for the drag with every path', async () => {
+    const outcome = { started: true, effect: 'copy', skipped: [] };
+    invoke.mockResolvedValue(outcome);
+    expect(await backend.startFileDrag(paths)).toEqual(outcome);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('start_file_drag', { paths });
+  });
+
+  it('passes a refusal through with its reason', async () => {
+    const refusal = { started: false, effect: 'none', skipped: [], reason: 'The mouse button was released.' };
+    invoke.mockResolvedValue(refusal);
+    expect(await backend.startFileDrag(paths)).toEqual(refusal);
+  });
+
+  it('answers through the DEV hook and never calls the backend when the hook is installed', async () => {
+    const requests: unknown[] = [];
+    const hook = (request: { paths: string[] }) => {
+      requests.push(request);
+      return { started: true, effect: 'none', skipped: [] };
+    };
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {}, __spFileDragHook: hook });
+    try {
+      expect(await backend.startFileDrag(paths)).toEqual({ started: true, effect: 'none', skipped: [] });
+      expect(requests).toEqual([{ paths }]);
+      expect(invoke).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    }
+  });
+});
+
 describe('showShellMenu inside Tauri', () => {
   const paths = ['C:\\one\\a.txt', 'C:\\two\\b.txt', 'C:\\two\\c.txt'];
 

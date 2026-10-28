@@ -6,6 +6,7 @@ mod drives;
 mod dropped_paths;
 mod dto;
 mod editor;
+mod file_drag;
 mod modal_guard;
 mod navigation;
 mod os_datetime;
@@ -158,6 +159,7 @@ fn main() {
             commands::show_shell_menu,
             commands::allow_preview,
             commands::existing_paths,
+            commands::start_file_drag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Spelunker");

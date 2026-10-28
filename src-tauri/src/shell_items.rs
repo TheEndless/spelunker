@@ -137,7 +137,6 @@ impl ParsedPaths {
     /// A shell data object (CF_HDROP and the shell formats) for all the items, even across folders.
     ///
     /// Call it on the window thread, inside its COM apartment.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the native drag uses it next"))]
     pub fn data_object(self) -> Result<ShellObject<IDataObject>, String> {
         let array = self.create_item_array()?;
         // SAFETY: a plain COM call on a valid interface, with no bind context.

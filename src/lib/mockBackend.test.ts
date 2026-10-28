@@ -1,6 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fileCategory } from './fileKinds';
-import { deepPath, deepRow } from './mockBackend';
+import { deepPath, deepRow, existingPaths } from './mockBackend';
+
+describe('existingPaths in the browser mock', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reports every path as existing by default', () => {
+    expect(existingPaths(['C:\\a.txt', 'C:\\b.txt'])).toEqual(['C:\\a.txt', 'C:\\b.txt']);
+  });
+
+  it('leaves out the paths a script marked missing, keeping the order', () => {
+    vi.stubGlobal('window', { __spMockMissingPaths: ['C:\\b.txt'] });
+    expect(existingPaths(['C:\\a.txt', 'C:\\b.txt', 'C:\\c.txt'])).toEqual(['C:\\a.txt', 'C:\\c.txt']);
+  });
+});
 
 describe('deepPath', () => {
   it('is deterministic', () => {
