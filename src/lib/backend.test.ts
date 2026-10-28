@@ -22,21 +22,17 @@ beforeEach(() => {
 describe('existingPaths inside Tauri', () => {
   const paths = Array.from({ length: 1000 }, (_, index) => `C:\\data\\file_${index}.txt`);
 
-  it('asks the backend about the first path only, until the batch command replaces it', async () => {
-    invoke.mockResolvedValue(true);
+  it('asks the backend about every path in one call', async () => {
+    invoke.mockResolvedValue(paths);
     await backend.existingPaths(paths);
     expect(invoke).toHaveBeenCalledTimes(1);
-    expect(invoke).toHaveBeenCalledWith('path_exists', { path: paths[0] });
+    expect(invoke).toHaveBeenCalledWith('existing_paths', { paths });
   });
 
-  it('keeps every path when the first still exists', async () => {
-    invoke.mockResolvedValue(true);
-    expect(await backend.existingPaths(paths)).toEqual(paths);
-  });
-
-  it('drops only the first path when it is gone, and keeps the others', async () => {
-    invoke.mockResolvedValue(false);
-    expect(await backend.existingPaths(paths)).toEqual(paths.slice(1));
+  it('returns what the backend found, in its order', async () => {
+    const found = [paths[0], paths[2], paths[999]];
+    invoke.mockResolvedValue(found);
+    expect(await backend.existingPaths(paths)).toEqual(found);
   });
 
   it('asks nothing for no paths', async () => {

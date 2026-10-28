@@ -157,7 +157,7 @@ fn main() {
             commands::take_launch_folder,
             commands::show_shell_menu,
             commands::allow_preview,
-            commands::path_exists,
+            commands::existing_paths,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Spelunker");

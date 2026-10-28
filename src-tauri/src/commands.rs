@@ -117,13 +117,23 @@ pub fn reveal_path(path: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-/// Whether a path still exists, for dropping a row after the shell menu deleted or renamed it.
-/// It touches the disk, which can stall on an offline share, so it runs off the window's thread.
+/// The given paths that still exist, in the order given, for dropping the rows whose files the
+/// system menu deleted or renamed. One call covers any number of rows. It touches the disk, which
+/// can stall on an offline share, so it runs off the window's thread. Should the check itself
+/// fail, every path is taken to exist, so no row is dropped by mistake.
 #[tauri::command]
-pub async fn path_exists(path: String) -> bool {
-    tauri::async_runtime::spawn_blocking(move || std::path::Path::new(&path).exists())
+pub async fn existing_paths(paths: Vec<String>) -> Vec<String> {
+    let requested = paths.clone();
+    tauri::async_runtime::spawn_blocking(move || paths_that_exist(paths))
         .await
-        .unwrap_or(true)
+        .unwrap_or(requested)
+}
+
+fn paths_that_exist(paths: Vec<String>) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| std::path::Path::new(path).exists())
+        .collect()
 }
 
 /// The regex engine's complaint about a content query, or `None` when it is valid. Used for live
@@ -328,4 +338,58 @@ pub async fn allow_preview(app: tauri::AppHandle, path: String) -> Result<(), St
     app.asset_protocol_scope()
         .allow_file(&path)
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path_text(path: &std::path::Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn paths_that_exist_keeps_files_and_folders_in_the_order_given() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("here.txt");
+        std::fs::write(&file, b"here").unwrap();
+        let folder = root.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        let missing = root.path().join("gone.txt");
+
+        let requested = vec![path_text(&folder), path_text(&missing), path_text(&file)];
+        assert_eq!(
+            paths_that_exist(requested),
+            vec![path_text(&folder), path_text(&file)]
+        );
+    }
+
+    #[test]
+    fn paths_that_exist_drops_every_missing_path() {
+        let root = tempfile::tempdir().unwrap();
+        let requested = vec![
+            path_text(&root.path().join("one.txt")),
+            path_text(&root.path().join("two.txt")),
+        ];
+        assert!(paths_that_exist(requested).is_empty());
+    }
+
+    #[test]
+    fn paths_that_exist_of_nothing_is_nothing() {
+        assert!(paths_that_exist(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn paths_that_exist_keeps_a_repeated_path_at_each_position() {
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("here.txt");
+        std::fs::write(&file, b"here").unwrap();
+        let missing = root.path().join("gone.txt");
+
+        let requested = vec![path_text(&file), path_text(&missing), path_text(&file)];
+        assert_eq!(
+            paths_that_exist(requested),
+            vec![path_text(&file), path_text(&file)]
+        );
+    }
 }
