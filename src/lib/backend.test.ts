@@ -3,6 +3,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/core', () => ({ invoke, Channel: class {}, convertFileSrc: (path: string) => path }));
 
+/** The listener the backend gave the webview's drag and drop events, as the windowing library would call it. */
+const webviewDrops = vi.hoisted(() => ({ listener: null as null | ((event: { payload: unknown }) => unknown) }));
+vi.mock('@tauri-apps/api/webview', () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: async (listener: (event: { payload: unknown }) => unknown) => {
+      webviewDrops.listener = listener;
+      return () => (webviewDrops.listener = null);
+    },
+  }),
+}));
+
 /** The backend decides once, when it loads, whether it runs inside Tauri. These tests load it as if it did. */
 let backend: typeof import('./backend');
 
@@ -72,6 +83,61 @@ describe('startFileDrag inside Tauri', () => {
     } finally {
       vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
     }
+  });
+});
+
+describe('watchFolderDrops inside Tauri', () => {
+  const own = ['C:\\data\\a.txt', 'C:\\data\\b.txt'];
+  const position = { x: 10, y: 10 };
+
+  async function watch() {
+    const folders: string[][] = [];
+    const hovers: boolean[] = [];
+    const stop = await backend.watchFolderDrops((found) => folders.push(found), (over) => hovers.push(over));
+    const send = async (payload: unknown) => {
+      await webviewDrops.listener?.({ payload });
+    };
+    return { folders, hovers, send, stop };
+  }
+
+  it('ignores the enter, over and drop of the files the app is dragging out, in any case', async () => {
+    backend.outgoingDragPaths.replace(own);
+    const { folders, hovers, send, stop } = await watch();
+    const shouted = own.map((path) => path.toUpperCase());
+    await send({ type: 'enter', paths: shouted, position });
+    await send({ type: 'over', position });
+    await send({ type: 'drop', paths: shouted, position });
+    expect(hovers).not.toContain(true);
+    expect(folders).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+    stop();
+    backend.outgoingDragPaths.clear();
+  });
+
+  it('still shows the overlay for other files and searches their folders on drop', async () => {
+    backend.outgoingDragPaths.replace(own);
+    const { folders, hovers, send, stop } = await watch();
+    invoke.mockResolvedValue(['C:\\elsewhere']);
+    await send({ type: 'enter', paths: ['C:\\elsewhere\\c.txt'], position });
+    await send({ type: 'over', position });
+    await send({ type: 'drop', paths: ['C:\\elsewhere\\c.txt'], position });
+    expect(hovers).toEqual([true, true, false]);
+    expect(invoke).toHaveBeenCalledWith('folders_from_dropped_paths', { paths: ['C:\\elsewhere\\c.txt'] });
+    expect(folders).toEqual([['C:\\elsewhere']]);
+    stop();
+    backend.outgoingDragPaths.clear();
+  });
+
+  it('handles the same files as a user drop once the outgoing set is cleared', async () => {
+    backend.outgoingDragPaths.replace(own);
+    backend.outgoingDragPaths.clear();
+    const { folders, hovers, send, stop } = await watch();
+    invoke.mockResolvedValue(['C:\\data']);
+    await send({ type: 'enter', paths: own, position });
+    await send({ type: 'drop', paths: own, position });
+    expect(hovers).toEqual([true, false]);
+    expect(folders).toEqual([['C:\\data']]);
+    stop();
   });
 });
 

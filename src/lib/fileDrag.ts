@@ -23,6 +23,66 @@ export interface DragGesture {
   cancel(): void;
 }
 
+/** The key two spellings of one Windows path share: separators unified and case folded. */
+function pathKey(path: string): string {
+  return path.replace(/\//g, '\\').toLowerCase();
+}
+
+/**
+ * The files of a drag the app started itself. The window's own drop target sees that drag too, so
+ * its events are told apart from a user's drop by these paths. Kept until the next press, because
+ * the drop events arrive by another route than the drag's answer and can come after it.
+ */
+export class OutgoingPaths {
+  #keys = new Set<string>();
+
+  replace(paths: readonly string[]): void {
+    this.#keys = new Set(paths.map(pathKey));
+  }
+
+  clear(): void {
+    this.#keys.clear();
+  }
+
+  /** True when there are paths and every one of them is going out. */
+  coversAll(paths: readonly string[]): boolean {
+    return paths.length > 0 && paths.every((path) => this.#keys.has(pathKey(path)));
+  }
+}
+
+/** A drag and drop event on the window, as the windowing library reports it (positions left out). */
+export type FolderDropEvent =
+  | { type: 'enter'; paths: string[] }
+  | { type: 'over' }
+  | { type: 'leave' }
+  | { type: 'drop'; paths: string[] };
+
+/**
+ * Whether each drop event should be handled. Only enter and drop name their files, so a drag
+ * whose enter was the app's own keeps its over events ignored until it leaves or drops. A leave is
+ * always handled, since all it does is hide the overlay.
+ */
+export function createSelfDropFilter(isOutgoing: (paths: readonly string[]) => boolean): (event: FolderDropEvent) => boolean {
+  let ownDragOver = false;
+  return (event) => {
+    switch (event.type) {
+      case 'enter':
+        ownDragOver = isOutgoing(event.paths);
+        return !ownDragOver;
+      case 'over':
+        return !ownDragOver;
+      case 'leave':
+        ownDragOver = false;
+        return true;
+      case 'drop': {
+        const own = ownDragOver || isOutgoing(event.paths);
+        ownDragOver = false;
+        return !own;
+      }
+    }
+  };
+}
+
 /** The `buttons` bit of the primary (usually left) button. */
 const PRIMARY_BUTTON = 1;
 

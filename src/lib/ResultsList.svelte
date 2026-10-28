@@ -18,6 +18,7 @@
     type ColumnLayout,
   } from './columnLayout';
   import { fitColumnWidth, resizeWithKey } from './columnResize';
+  import { outgoingDragPaths } from './backend';
   import ContextMenu from './ContextMenu.svelte';
   import type { EmptyState } from './emptyState';
   import { createDragGesture } from './fileDrag';
@@ -500,6 +501,8 @@
           // button up (the release, a move with the button up, or the next press), so a click
           // that does follow it in a browser does not count as a new press.
           press.dragged = true;
+          // Before the drag starts, so the window's own drop events for it are known as ours.
+          outgoingDragPaths.replace(step.paths);
           void onDragOut(step.paths);
         }
       },
@@ -638,8 +641,12 @@
 </script>
 
 <!-- A second source for the pane width besides the element's size observer, so a missed
-     notification can never leave the columns sized for an older window. -->
-<svelte:window onresize={() => scroller && (scrollerClientWidth = scroller.clientWidth)} />
+     notification can never leave the columns sized for an older window. The files of the last
+     drag out stop counting as ours at the next press anywhere, before a row press can start a new one. -->
+<svelte:window
+  onresize={() => scroller && (scrollerClientWidth = scroller.clientWidth)}
+  onpointerdowncapture={() => outgoingDragPaths.clear()}
+/>
 
 <div class="wrap">
   <div

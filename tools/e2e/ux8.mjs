@@ -490,8 +490,15 @@ async function fileDragChecks() {
   check('the release after the drag does not collapse the selection (rows 2 to 5)', same(await selected(), range(2, 5)), await selected());
   check('the drag went through the hook alone: no Tauri bridge exists on this page', await ev(`typeof window.__TAURI_INTERNALS__ === 'undefined' && window.__sp.fileDragCalls.length === 1`));
 
+  await selfDropChecks(pathsOf([2, 3, 4, 5]));
+
   await clickRow(9);
   check('a click right after a drag is not swallowed: it selects row 9 alone', same(await selected(), [9]) && same(await current(), [9]), { selected: await selected(), current: await current() });
+
+  await emitDrop({ type: 'enter', paths: pathsOf([2, 3, 4, 5]) });
+  check('after the next press the same files count as a user drag again: the overlay shows', await overlayShown());
+  await emitDrop({ type: 'leave' });
+  check('and a leave hides it', !(await overlayShown()));
 
   await ev('window.__sp.fileDragCalls.length = 0');
   await startFrom(2);
@@ -523,6 +530,39 @@ async function fileDragChecks() {
   check('after those presses a plain click selects normally: row 6 alone', same(await selected(), [6]) && same(await current(), [6]), { selected: await selected(), current: await current() });
 
   await vanishedRowChecks(pathsOf);
+}
+
+const lookIn = () => ev(`document.querySelector('[role=combobox]').value`);
+const overlayShown = () => ev(`!!document.querySelector('.drop-hint')`);
+
+/**
+ * Delivers a drag and drop event to the window's handler the way the windowing library does inside
+ * the app. A browser gets none, so the page's DEV seam `window.__spEmitFolderDrop` takes them.
+ */
+async function emitDrop(event) {
+  const position = { x: 300, y: 300 };
+  await ev(`window.__spEmitFolderDrop(${JSON.stringify(event.type === 'leave' ? event : { ...event, position })})`);
+  await sleep(150);
+}
+
+/**
+ * The window's own drop target sees a drag out of the list too, from the moment it starts. Its
+ * events must not show the "Drop a folder" overlay or set Look in, while a drop of other files must.
+ */
+async function selfDropChecks(outgoing) {
+  const lookInBefore = await lookIn();
+  const respelled = outgoing.map((path) => path.toUpperCase().replace(/\\/g, '/'));
+  await emitDrop({ type: 'enter', paths: respelled });
+  await emitDrop({ type: 'over' });
+  check('the enter and over events of the outgoing files (in another case and with forward slashes) show no overlay', !(await overlayShown()));
+  await emitDrop({ type: 'drop', paths: respelled });
+  check('dropping the outgoing files on the window leaves Look in alone and shows no overlay', (await lookIn()) === lookInBefore && !(await overlayShown()), { lookIn: await lookIn(), lookInBefore });
+
+  await emitDrop({ type: 'enter', paths: ['C:\\elsewhere\\notes.txt'] });
+  check('a drag of other files still shows the overlay', await overlayShown());
+  await emitDrop({ type: 'drop', paths: ['C:\\elsewhere\\notes.txt'] });
+  check('and dropping them sets Look in to their folder and hides the overlay', (await lookIn()) === 'C:\\elsewhere' && !(await overlayShown()), await lookIn());
+  await setField('[role=combobox]', lookInBefore);
 }
 
 /**

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fileCategory } from './fileKinds';
-import { deepPath, deepRow, existingPaths } from './mockBackend';
+import { deepPath, deepRow, existingPaths, foldersFromDroppedPaths } from './mockBackend';
+
+describe('foldersFromDroppedPaths in the browser mock', () => {
+  it('turns a file into its folder, keeps a folder, and names each folder once in order', () => {
+    expect(foldersFromDroppedPaths(['C:\\work\\notes.txt', 'D:\\projects', 'C:\\work\\todo.md'])).toEqual(['C:\\work', 'D:\\projects']);
+  });
+});
 
 describe('existingPaths in the browser mock', () => {
   afterEach(() => vi.unstubAllGlobals());

@@ -204,6 +204,19 @@ export function existingPaths(paths: string[]): string[] {
   return paths.filter((path) => !missing.has(path));
 }
 
+/**
+ * The folders to search for dropped paths, without a disk to ask: a path whose last part has an
+ * extension counts as a file and stands for its folder.
+ */
+export function foldersFromDroppedPaths(paths: string[]): string[] {
+  const folders = paths.map((path) => {
+    const separator = path.lastIndexOf('\\');
+    const looksLikeFile = path.slice(separator + 1).includes('.');
+    return looksLikeFile && separator > 0 ? path.slice(0, separator) : path;
+  });
+  return [...new Set(folders)];
+}
+
 /** A browser has no native file drag, so the drag ends at once with nothing done. */
 export function startFileDrag(_paths: string[]): DragOutcome {
   return { started: true, effect: 'none', skipped: [] };

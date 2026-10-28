@@ -1,5 +1,77 @@
 import { describe, expect, it } from 'vitest';
-import { createDragGesture } from './fileDrag';
+import { createDragGesture, createSelfDropFilter, OutgoingPaths, type FolderDropEvent } from './fileDrag';
+
+describe('OutgoingPaths', () => {
+  const outgoing = ['C:\\Data\\One.txt', 'D:\\other\\two.log'];
+
+  it('covers the outgoing paths whatever their case or separator style', () => {
+    const paths = new OutgoingPaths();
+    paths.replace(outgoing);
+    expect(paths.coversAll(['c:/data/one.TXT', 'd:\\OTHER/two.log'])).toBe(true);
+    expect(paths.coversAll(['D:\\other\\two.log'])).toBe(true);
+  });
+
+  it('does not cover a list with any path that is not going out', () => {
+    const paths = new OutgoingPaths();
+    paths.replace(outgoing);
+    expect(paths.coversAll(['C:\\Data\\One.txt', 'C:\\Data\\three.txt'])).toBe(false);
+  });
+
+  it('covers nothing when empty, and an empty list is never covered', () => {
+    const paths = new OutgoingPaths();
+    expect(paths.coversAll(outgoing)).toBe(false);
+    paths.replace(outgoing);
+    expect(paths.coversAll([])).toBe(false);
+  });
+
+  it('forgets everything on clear, and the old paths on replace', () => {
+    const paths = new OutgoingPaths();
+    paths.replace(outgoing);
+    paths.clear();
+    expect(paths.coversAll([outgoing[0]])).toBe(false);
+    paths.replace([outgoing[1]]);
+    expect(paths.coversAll([outgoing[0]])).toBe(false);
+    expect(paths.coversAll([outgoing[1]])).toBe(true);
+  });
+});
+
+describe('createSelfDropFilter', () => {
+  const own = ['C:\\data\\a.txt', 'C:\\data\\b.txt'];
+  const outgoing = new OutgoingPaths();
+  outgoing.replace(own);
+  const handled = (events: FolderDropEvent[]) => {
+    const shouldHandle = createSelfDropFilter((paths) => outgoing.coversAll(paths));
+    return events.map(shouldHandle);
+  };
+
+  it('ignores the enter, over and drop of a drag the app started', () => {
+    expect(handled([{ type: 'enter', paths: own }, { type: 'over' }, { type: 'over' }, { type: 'drop', paths: own }])).toEqual([false, false, false, false]);
+  });
+
+  it('matches the paths case-insensitively', () => {
+    const shouted = own.map((path) => path.toUpperCase());
+    expect(handled([{ type: 'enter', paths: shouted }, { type: 'over' }, { type: 'drop', paths: shouted }])).toEqual([false, false, false]);
+  });
+
+  it('handles every event of a drag of other files', () => {
+    const other = ['C:\\elsewhere\\c.txt'];
+    expect(handled([{ type: 'enter', paths: other }, { type: 'over' }, { type: 'drop', paths: other }])).toEqual([true, true, true]);
+  });
+
+  it('handles a drag that carries the outgoing files and others too', () => {
+    const mixed = [...own, 'C:\\elsewhere\\c.txt'];
+    expect(handled([{ type: 'enter', paths: mixed }, { type: 'over' }, { type: 'drop', paths: mixed }])).toEqual([true, true, true]);
+  });
+
+  it('lets a leave through, which only hides the overlay, and handles the next drag of other files', () => {
+    const other = ['C:\\elsewhere\\c.txt'];
+    expect(handled([{ type: 'enter', paths: own }, { type: 'leave' }, { type: 'enter', paths: other }, { type: 'over' }])).toEqual([false, true, true, true]);
+  });
+
+  it('ignores the outgoing drag again when it comes back over the window', () => {
+    expect(handled([{ type: 'enter', paths: own }, { type: 'leave' }, { type: 'enter', paths: own }, { type: 'over' }, { type: 'drop', paths: own }])).toEqual([false, true, false, false, false]);
+  });
+});
 
 const PRIMARY = 1;
 const NO_BUTTONS = 0;

@@ -1,4 +1,5 @@
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { createSelfDropFilter, OutgoingPaths, type FolderDropEvent } from './fileDrag';
 import type { MillisRange } from './filters';
 import type { FileText, PreviewLine, QueryOptions, SearchMessage } from './types';
 
@@ -63,27 +64,55 @@ export async function revealPath(path: string): Promise<void> {
 }
 
 /**
+ * The files the results list is dragging out. The list fills it when it starts a drag and clears
+ * it on the next press, and `watchFolderDrops` ignores drop events for exactly these files, so
+ * releasing them over the window itself does not change Look in.
+ */
+export const outgoingDragPaths = new OutgoingPaths();
+
+/**
  * Calls `onFolders` with the folders to search when files or folders are dropped on the window,
  * and `onHover` while something is being dragged over it. Returns a function that stops listening.
+ * A drag of the files the list is dragging out is ignored throughout.
  */
 export async function watchFolderDrops(
   onFolders: (folders: string[]) => void,
   onHover: (over: boolean) => void,
 ): Promise<() => void> {
-  if (!insideTauri) return () => {};
+  const foldersFor = async (paths: string[]) =>
+    insideTauri ? invoke<string[]>('folders_from_dropped_paths', { paths }) : (await mock()).foldersFromDroppedPaths(paths);
+  const handle = folderDropHandler(onFolders, onHover, foldersFor);
+  if (!insideTauri) {
+    // A browser gets no drop events from the windowing library, so in development the end-to-end
+    // scripts deliver them through this seam. A release build drops it.
+    if (!import.meta.env.DEV) return () => {};
+    window.__spEmitFolderDrop = handle;
+    return () => {
+      if (window.__spEmitFolderDrop === handle) delete window.__spEmitFolderDrop;
+    };
+  }
   const { getCurrentWebview } = await import('@tauri-apps/api/webview');
-  return getCurrentWebview().onDragDropEvent(async (event) => {
-    const payload = event.payload;
-    if (payload.type === 'enter' || payload.type === 'over') {
+  return getCurrentWebview().onDragDropEvent((event) => handle(event.payload));
+}
+
+function folderDropHandler(
+  onFolders: (folders: string[]) => void,
+  onHover: (over: boolean) => void,
+  foldersFor: (paths: string[]) => Promise<string[]>,
+): (event: FolderDropEvent) => Promise<void> {
+  const shouldHandle = createSelfDropFilter((paths) => outgoingDragPaths.coversAll(paths));
+  return async (event) => {
+    if (!shouldHandle(event)) return;
+    if (event.type === 'enter' || event.type === 'over') {
       onHover(true);
-    } else if (payload.type === 'leave') {
+    } else if (event.type === 'leave') {
       onHover(false);
-    } else if (payload.type === 'drop') {
+    } else {
       onHover(false);
-      const folders = await invoke<string[]>('folders_from_dropped_paths', { paths: payload.paths });
+      const folders = await foldersFor(event.paths);
       if (folders.length > 0) onFolders(folders);
     }
-  });
+  };
 }
 
 export async function pickFolder(): Promise<string | null> {
@@ -217,6 +246,8 @@ declare global {
      * real cursor is, so end-to-end scripts install this to record the request instead.
      */
     __spFileDragHook?: (request: FileDragRequest) => DragOutcome;
+    /** A test seam in development builds outside Tauri: delivers a drag and drop event to the window's handler. */
+    __spEmitFolderDrop?: (event: FolderDropEvent) => Promise<void>;
   }
 }
 
