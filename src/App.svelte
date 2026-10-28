@@ -51,12 +51,11 @@
     type Modifiers,
     type SelectionState,
   } from './lib/selection';
-  import { selectionSummary } from './lib/selectionSummary';
+  import { selectionAnnouncement, selectionSummary } from './lib/selectionSummary';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { withShortcut } from './lib/shortcuts';
   import Splitter from './lib/Splitter.svelte';
   import StatusBar from './lib/StatusBar.svelte';
-  import { count } from './lib/statusSummary';
   import StoppingDialog from './lib/StoppingDialog.svelte';
   import type { DisplayRow } from './lib/types';
   import { createValidator } from './lib/validation.svelte';
@@ -171,49 +170,50 @@
    * "N selected" for screen readers after select all, a range, or a keyboard toggle, which moving
    * the active row does not announce. It waits until the keys settle, so holding Shift+Down says it once.
    */
-  let selectionAnnouncement = $state('');
+  let selectionAnnouncementText = $state('');
   let selectionAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
   const SELECTION_ANNOUNCEMENT_DELAY_MS = 400;
 
-  function announceSelectionSoon() {
+  /**
+   * Replaces the selection. With `announce`, a real change is spoken once the keys settle. Any other
+   * change drops a pending announcement, which would describe a selection that is gone.
+   */
+  function changeSelection(next: SelectionState, announce = false) {
+    const text = selectionAnnouncement(selection, next);
+    selection = next;
+    if (text === null) return;
     clearTimeout(selectionAnnouncementTimer);
+    if (!announce) return;
     // Emptied first, so the same count said twice in a row is still announced.
-    selectionAnnouncement = '';
-    selectionAnnouncementTimer = setTimeout(
-      () => (selectionAnnouncement = count(selection.paths.size, 'selected', 'selected')),
-      SELECTION_ANNOUNCEMENT_DELAY_MS,
-    );
+    selectionAnnouncementText = '';
+    selectionAnnouncementTimer = setTimeout(() => (selectionAnnouncementText = text), SELECTION_ANNOUNCEMENT_DELAY_MS);
   }
 
   function pressResultRow(index: number, modifiers: Modifiers) {
-    selection = pressRow(selection, session.sortedRows, index, modifiers);
-    if (modifiers.shift) announceSelectionSoon();
+    changeSelection(pressRow(selection, session.sortedRows, index, modifiers), modifiers.shift);
   }
 
   function releaseResultRow(index: number, modifiers: Modifiers, pressedOnSelected: boolean) {
-    selection = releaseRow(selection, session.sortedRows, index, modifiers, pressedOnSelected);
+    changeSelection(releaseRow(selection, session.sortedRows, index, modifiers, pressedOnSelected));
   }
 
   function moveCurrentRow(targetIndex: number, modifiers: Modifiers) {
-    selection = moveCurrent(selection, session.sortedRows, targetIndex, modifiers);
-    if (modifiers.shift) announceSelectionSoon();
+    changeSelection(moveCurrent(selection, session.sortedRows, targetIndex, modifiers), modifiers.shift);
   }
 
   function toggleCurrentRow() {
-    selection = toggleCurrent(selection);
-    announceSelectionSoon();
+    changeSelection(toggleCurrent(selection), true);
   }
 
   function selectAllRows() {
-    selection = selectAll(selection, session.sortedRows);
-    announceSelectionSoon();
+    changeSelection(selectAll(selection, session.sortedRows), true);
   }
 
   /** Takes rows whose files are gone out of the results, and out of the selection. */
   function removeVanishedRows(paths: string[]) {
     if (paths.length === 0) return;
     session.removeRows(paths);
-    selection = pruneSelection(selection, session.rows);
+    changeSelection(pruneSelection(selection, session.rows));
   }
 
   const canExport = $derived(!session.running && session.rows.length > 0);
@@ -267,7 +267,7 @@
     if (!request.ok) return;
     preferences.rememberFolders();
     preferences.save();
-    selection = EMPTY_SELECTION;
+    changeSelection(EMPTY_SELECTION);
     searchedCriteria = $state.snapshot(preferences.criteria);
     session.start(request.value);
   }
@@ -548,7 +548,7 @@
               preferences.save();
             }}
             onSelect={(row) => {
-              selection = selectOnly(row.path);
+              changeSelection(selectOnly(row.path));
               revealRequest = { path: row.path, token: ++revealToken };
             }}
             onOpen={(row) => openPath(row.path)}
@@ -636,7 +636,7 @@
 
 <div class="sr-only" id="search-announcement" role="status" aria-live="polite">{announcement}</div>
 <!-- Separate from the search's region, which is derived from the search state alone. -->
-<div class="sr-only" id="selection-announcement" role="status" aria-live="polite">{selectionAnnouncement}</div>
+<div class="sr-only" id="selection-announcement" role="status" aria-live="polite">{selectionAnnouncementText}</div>
 
 <StoppingDialog visible={session.stoppingNoticeVisible} onHide={() => session.hideStoppingNotice()} />
 

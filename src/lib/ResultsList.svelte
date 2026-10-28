@@ -22,7 +22,7 @@
   import type { EmptyState } from './emptyState';
   import FileIcon from './FileIcon.svelte';
   import { formatSize, modifiedLabel } from './format';
-  import { gridKeyAction, modifiersOf, NO_MODIFIERS, type RowPress } from './listSelectionInput';
+  import { gridKeyAction, keyboardMenuTarget, modifiersOf, NO_MODIFIERS, type RowPress } from './listSelectionInput';
   import { findRowIndex } from './rowLookup';
   import Icon from './Icon.svelte';
   import type { Modifiers, SelectionState } from './selection';
@@ -193,17 +193,22 @@
     onLayout({ ...layout, widths: resizeColumn(from, visibleColumns(layout), id, width), autoSize: false });
   }
 
-  /** Follows the pointer across the whole window until the button is released or the press is cancelled. */
-  function trackPointer(move: (event: PointerEvent) => void, finish?: () => void) {
-    const stop = () => {
+  /**
+   * Follows the pointer across the whole window until the button is released or the press is
+   * cancelled. `finish` hears the event that ended it, or none when the caller stopped it. Returns
+   * that stop function.
+   */
+  function trackPointer(move: (event: PointerEvent) => void, finish?: (event?: PointerEvent) => void): () => void {
+    const stop = (event?: PointerEvent) => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', stop);
       window.removeEventListener('pointercancel', stop);
-      finish?.();
+      finish?.(event);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', stop);
     window.addEventListener('pointercancel', stop);
+    return stop;
   }
 
   function startResize(event: PointerEvent, column: Column) {
@@ -383,12 +388,20 @@
     });
   });
 
-  /** The keyboard's menu, anchored on the current row. The app decides whether it covers the selection. */
+  /**
+   * The keyboard's menu, doing what a right-click on its row does: on the current row (selected alone
+   * first when it is not selected), or without one on the first selected row on screen. The app
+   * decides whether it covers the selection.
+   */
   function openContextMenuAtCurrent(): void | Promise<void> {
-    const row = rows[currentIndex];
-    if (!row) return;
-    revealIndex(currentIndex);
-    const anchor = document.getElementById(rowId(currentIndex)) ?? scroller;
+    const firstOnScreen = Math.floor(scroller.scrollTop / ROW_HEIGHT);
+    const endOnScreen = Math.ceil((scroller.scrollTop + viewportHeight - HEADER_HEIGHT) / ROW_HEIGHT);
+    const target = keyboardMenuTarget(selection, rows, firstOnScreen, endOnScreen, currentIndex);
+    if (!target) return;
+    const row = rows[target.index];
+    if (target.selectFirst) onPress(row, target.index, NO_MODIFIERS);
+    revealIndex(target.index);
+    const anchor = document.getElementById(rowId(target.index)) ?? scroller;
     const box = anchor.getBoundingClientRect();
     return onContextMenu(row, box.left + 32, box.bottom);
   }
@@ -457,9 +470,19 @@
     rowPress = press;
     onPress(row, index, modifiersOf(event));
     onRowPress?.(press);
-    trackPointer((moveEvent) => {
-      if (Math.hypot(moveEvent.clientX - press.startX, moveEvent.clientY - press.startY) >= DRAG_THRESHOLD) press.dragged = true;
-    });
+    const forget = () => {
+      if (rowPress === press) rowPress = null;
+    };
+    const stop = trackPointer(
+      (moveEvent) => {
+        // The button went up where the page did not see it (outside the window, or a modal loop took it).
+        if ((moveEvent.buttons & 1) === 0) return stop();
+        if (Math.hypot(moveEvent.clientX - press.startX, moveEvent.clientY - press.startY) >= DRAG_THRESHOLD) press.dragged = true;
+      },
+      // The row's click follows a release in the same input event, after this. The press is kept for
+      // it and forgotten one task later. A cancelled press, or a release the page never saw, has no click.
+      (endEvent) => (endEvent?.type === 'pointerup' ? setTimeout(forget) : forget()),
+    );
   }
 
   /** Finishes a press with the release rules, unless the press became a drag. */

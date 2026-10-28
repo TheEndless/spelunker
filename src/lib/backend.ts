@@ -136,12 +136,15 @@ export async function previewSource(path: string): Promise<string> {
 /**
  * The given paths that still exist, used to drop rows after the system menu deleted or renamed
  * files. The browser mock has no files to lose, so every path exists there.
- * Until the batch `existing_paths` command exists (plan Task 6), each path is checked on its own.
+ * The native menu still acts on the first path alone (see `showShellMenu`), so only that one can
+ * have gone, and only that one is checked. Plan Task 6 replaces this with the batch
+ * `existing_paths` command once the menu takes every path.
  */
 export async function existingPaths(paths: string[]): Promise<string[]> {
-  if (!insideTauri) return [...paths];
-  const found = await Promise.all(paths.map((path) => invoke<boolean>('path_exists', { path })));
-  return paths.filter((_, index) => found[index]);
+  if (!insideTauri || paths.length === 0) return [...paths];
+  const [first, ...others] = paths;
+  const firstExists = await invoke<boolean>('path_exists', { path: first });
+  return firstExists ? [...paths] : others;
 }
 
 /** Opens a file in the editor chosen in Settings, at a line. Without a command it opens normally. */

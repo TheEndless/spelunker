@@ -1,4 +1,5 @@
 import { nextRowIndex } from './gridNavigation';
+import { findRowIndex } from './rowLookup';
 import { selectedRows, type Modifiers, type SelectionState } from './selection';
 
 /**
@@ -55,6 +56,33 @@ export function gridKeyAction(event: GridKeyEvent, currentIndex: number, rowCoun
   if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === 'a') return { kind: 'selectAll' };
   if (event.key === 'Enter') return { kind: 'open' };
   if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) return { kind: 'menu' };
+  return null;
+}
+
+/** Where the keyboard's menu opens, and whether that row must first be selected alone. */
+export interface KeyboardMenuTarget {
+  index: number;
+  selectFirst: boolean;
+}
+
+/**
+ * Where the Menu key or Shift+F10 opens the menu, doing what a right-click there would. On the
+ * current row, which is selected alone first when it is not selected. Without a current row, on the
+ * first selected row among those on screen (`visibleStart` to before `visibleEnd`), and nowhere when
+ * none is on screen or nothing is selected.
+ */
+export function keyboardMenuTarget(
+  selection: SelectionState,
+  rows: { path: string }[],
+  visibleStart: number,
+  visibleEnd: number,
+  currentIndex = findRowIndex(rows, selection.current, -1),
+): KeyboardMenuTarget | null {
+  if (currentIndex >= 0) return { index: currentIndex, selectFirst: !selection.paths.has(rows[currentIndex].path) };
+  if (selection.paths.size === 0) return null;
+  for (let index = Math.max(0, visibleStart); index < Math.min(visibleEnd, rows.length); index++) {
+    if (selection.paths.has(rows[index].path)) return { index, selectFirst: false };
+  }
   return null;
 }
 

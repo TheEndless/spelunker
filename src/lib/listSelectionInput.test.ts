@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gridKeyAction, menuRowsFor, modifiersOf, type GridKeyEvent } from './listSelectionInput';
+import { gridKeyAction, keyboardMenuTarget, menuRowsFor, modifiersOf, type GridKeyEvent } from './listSelectionInput';
 import { EMPTY_SELECTION, type SelectionState } from './selection';
 
 const rows = ['a', 'b', 'c', 'd', 'e'].map((path) => ({ path, name: path.toUpperCase() }));
@@ -103,5 +103,44 @@ describe('gridKeyAction', () => {
 
   it('does not move in an empty list', () => {
     expect(act(keyEvent('ArrowDown'), -1, 0)).toBeNull();
+  });
+});
+
+describe('keyboardMenuTarget', () => {
+  /** Rows 1 to 3 are on screen. */
+  const target = (state: SelectionState) => keyboardMenuTarget(state, rows, 1, 4);
+
+  it('opens on a selected current row without changing the selection', () => {
+    const state: SelectionState = { anchor: 'c', current: 'c', paths: new Set(['a', 'c']) };
+    expect(target(state)).toEqual({ index: 2, selectFirst: false });
+  });
+
+  it('selects an unselected current row alone first, as a right-click does', () => {
+    const state: SelectionState = { anchor: 'd', current: 'd', paths: new Set(['a', 'b']) };
+    expect(target(state)).toEqual({ index: 3, selectFirst: true });
+  });
+
+  it('anchors on the current row even when it is off screen', () => {
+    const state: SelectionState = { anchor: 'e', current: 'e', paths: new Set(['e']) };
+    expect(target(state)).toEqual({ index: 4, selectFirst: false });
+  });
+
+  it('without a current row, anchors on the first selected row on screen', () => {
+    const state: SelectionState = { anchor: null, current: null, paths: new Set(['a', 'c', 'd']) };
+    expect(target(state)).toEqual({ index: 2, selectFirst: false });
+  });
+
+  it('without a current row, does nothing when no selected row is on screen', () => {
+    const state: SelectionState = { anchor: null, current: null, paths: new Set(['a', 'e']) };
+    expect(target(state)).toBeNull();
+  });
+
+  it('does nothing with no current row and nothing selected', () => {
+    expect(target(EMPTY_SELECTION)).toBeNull();
+  });
+
+  it('treats a current row that left the list as no current row', () => {
+    const state: SelectionState = { anchor: 'z', current: 'z', paths: new Set(['b']) };
+    expect(target(state)).toEqual({ index: 1, selectFirst: false });
   });
 });
