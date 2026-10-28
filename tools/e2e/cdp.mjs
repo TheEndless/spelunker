@@ -92,6 +92,6 @@ export const PAGE_HELPERS = `
   // is recorded and answered as "nothing chosen" without ever showing the menu.
   window.__spShellMenuHook = (request) => {
     window.__sp.shellMenuCalls.push(request);
-    return { extra: null, ranShellCommand: false };
+    return { extra: null, ranShellCommand: false, skipped: [] };
   };
   true`;

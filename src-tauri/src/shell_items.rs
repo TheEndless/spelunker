@@ -8,13 +8,6 @@
 //! apartment that thread already has. The types are not `Send` (they hold raw item id pointers and
 //! apartment-bound COM interfaces), so the compiler keeps them on that thread.
 
-// The system menu and the native drag start using this in the next tasks. Until then only the
-// tests do, and this expectation fails the build once it is no longer needed.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "used by the multi-item menu and drag next")
-)]
-
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
@@ -144,6 +137,10 @@ impl ParsedPaths {
     /// The shell's item array for all the items.
     ///
     /// Call it on the window thread, inside its COM apartment.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "only the tests read the array on its own so far")
+    )]
     pub fn shell_item_array(self) -> Result<ShellObject<IShellItemArray>, String> {
         let array = self.create_item_array()?;
         Ok(self.wrap(array))
@@ -152,6 +149,7 @@ impl ParsedPaths {
     /// A shell data object (CF_HDROP and the shell formats) for all the items, even across folders.
     ///
     /// Call it on the window thread, inside its COM apartment.
+    #[cfg_attr(not(test), expect(dead_code, reason = "the native drag uses it next"))]
     pub fn data_object(self) -> Result<ShellObject<IDataObject>, String> {
         let array = self.create_item_array()?;
         // SAFETY: a plain COM call on a valid interface, with no bind context.

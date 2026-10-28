@@ -6,6 +6,7 @@ mod drives;
 mod dropped_paths;
 mod dto;
 mod editor;
+mod modal_guard;
 mod navigation;
 mod os_datetime;
 mod preview_access;

@@ -412,11 +412,19 @@
     const paths = rows.map((chosen) => chosen.path);
     try {
       const result = await showShellMenu(paths, x, y, actions.map((action) => action.label));
+      // Files that were gone before the menu opened were left out of it. Say so, and drop their rows.
+      const skipped = new Set(result.skipped);
+      if (skipped.size > 0) {
+        const count = skipped.size.toLocaleString('en-US');
+        say('info', skipped.size === 1 ? `${count} file no longer exists` : `${count} files no longer exist`);
+        removeVanishedRows(result.skipped);
+      }
       if (result.extra !== null) actions[result.extra]?.run();
       // A shell command such as Delete or Rename can remove files, so drop the rows whose files are gone.
       if (result.ranShellCommand) {
-        const remaining = new Set(await existingPaths(paths));
-        removeVanishedRows(paths.filter((path) => !remaining.has(path)));
+        const shown = paths.filter((path) => !skipped.has(path));
+        const remaining = new Set(await existingPaths(shown));
+        removeVanishedRows(shown.filter((path) => !remaining.has(path)));
       }
     } catch (error) {
       say('error', String(error));

@@ -22,7 +22,7 @@ beforeEach(() => {
 describe('existingPaths inside Tauri', () => {
   const paths = Array.from({ length: 1000 }, (_, index) => `C:\\data\\file_${index}.txt`);
 
-  it('asks the backend about the first path only, since the native menu acts on that one alone', async () => {
+  it('asks the backend about the first path only, until the batch command replaces it', async () => {
     invoke.mockResolvedValue(true);
     await backend.existingPaths(paths);
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -41,6 +41,28 @@ describe('existingPaths inside Tauri', () => {
 
   it('asks nothing for no paths', async () => {
     expect(await backend.existingPaths([])).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('showShellMenu inside Tauri', () => {
+  const paths = ['C:\\one\\a.txt', 'C:\\two\\b.txt', 'C:\\two\\c.txt'];
+
+  it('sends every path to the native menu with the position in device pixels', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {}, devicePixelRatio: 2 });
+    try {
+      const answer = { extra: null, ranShellCommand: false, skipped: [paths[1]] };
+      invoke.mockResolvedValue(answer);
+      expect(await backend.showShellMenu(paths, 10, 20.4, ['Copy paths'])).toEqual(answer);
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(invoke).toHaveBeenCalledWith('show_shell_menu', { paths, x: 20, y: 41, extraLabels: ['Copy paths'] });
+    } finally {
+      vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    }
+  });
+
+  it('shows nothing for no paths', async () => {
+    expect(await backend.showShellMenu([], 0, 0, [])).toEqual({ extra: null, ranShellCommand: false, skipped: [] });
     expect(invoke).not.toHaveBeenCalled();
   });
 });

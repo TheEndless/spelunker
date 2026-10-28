@@ -272,13 +272,13 @@ pub fn take_launch_folder(launch: State<'_, LaunchFolder>) -> Option<String> {
     launch.0.lock().unwrap().take()
 }
 
-/// Shows Explorer's own context menu for `path` at (`x`, `y`), in the window's client pixels.
-/// `extra_labels` are our own entries put above it. Runs on the window's thread, which is where
-/// the shell needs it.
+/// Shows Explorer's own context menu for all of `paths` at (`x`, `y`), in the window's client
+/// pixels. `extra_labels` are our own entries put above it. Runs on the window's thread, which is
+/// where the shell needs it. Fails with a message for the user when none of the paths exist.
 #[tauri::command]
 pub fn show_shell_menu(
     window: tauri::WebviewWindow,
-    path: String,
+    paths: Vec<String>,
     x: i32,
     y: i32,
     extra_labels: Vec<String>,
@@ -291,23 +291,26 @@ pub fn show_shell_menu(
         .into_iter()
         .map(|label| ExtraItem { label })
         .collect();
-    let outcome = show(hwnd, &path, screen_x, screen_y, &extras)?;
+    let choice = show(hwnd, &paths, screen_x, screen_y, &extras)?;
     Ok(ShellMenuResult {
-        extra: match outcome {
+        extra: match choice.outcome {
             Outcome::Extra(index) => Some(index),
             Outcome::ShellCommand | Outcome::Dismissed => None,
         },
-        ran_shell_command: outcome == Outcome::ShellCommand,
+        ran_shell_command: choice.outcome == Outcome::ShellCommand,
+        skipped: choice.skipped,
     })
 }
 
 /// What the user did in the system menu: chose one of our entries, or the shell carried out one of
-/// its own (which may have deleted or renamed the file), or nothing.
+/// its own (which may have deleted or renamed files), or nothing. `skipped` names the requested
+/// paths that no longer existed, which the menu left out.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellMenuResult {
     pub extra: Option<usize>,
     pub ran_shell_command: bool,
+    pub skipped: Vec<String>,
 }
 
 /// Lets the webview load one file (a picture, PDF, audio or video) through the asset protocol.
