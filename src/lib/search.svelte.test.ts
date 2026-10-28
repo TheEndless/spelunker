@@ -144,6 +144,72 @@ describe('row ids and session events', () => {
   });
 });
 
+describe('removing many rows at once', () => {
+  it('removes every named row with a single assignment to rows', () => {
+    const session = startedSession();
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b', 'C:/x/c', 'C:/x/d'));
+    const before = session.rows;
+    const rowCountSeenByListener: number[] = [];
+    session.subscribe({
+      appended: () => {},
+      removed: () => rowCountSeenByListener.push(session.rows.length),
+      reset: () => {},
+    });
+    session.removeRows(new Set(['C:/x/b', 'C:/x/d']));
+    expect(session.rows).not.toBe(before);
+    expect(session.rows.map((row) => row.path)).toEqual(['C:/x/a', 'C:/x/c']);
+    expect(before).toHaveLength(4);
+    // Listeners only run once rows already holds the final list.
+    expect(rowCountSeenByListener).toEqual([2, 2]);
+  });
+
+  it('fires one removed event per removed row in the rows order, not the argument order', () => {
+    const session = startedSession();
+    const removedIds: number[] = [];
+    session.subscribe({ appended: () => {}, removed: (id) => removedIds.push(id), reset: () => {} });
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b', 'C:/x/c'));
+    session.removeRows(['C:/x/c', 'C:/x/a']);
+    expect(removedIds).toEqual([0, 2]);
+  });
+
+  it('ignores unknown paths', () => {
+    const session = startedSession();
+    const removedIds: number[] = [];
+    session.subscribe({ appended: () => {}, removed: (id) => removedIds.push(id), reset: () => {} });
+    backend.emit!(batchOf('C:/x/a'));
+    session.removeRows(['C:/x/nope', 'C:/x/a']);
+    expect(removedIds).toEqual([0]);
+    expect(session.rows).toHaveLength(0);
+  });
+
+  it('keeps rowById and the duplicate guard consistent', () => {
+    const session = startedSession();
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    session.removeRows(['C:/x/a']);
+    expect(session.rowById(0)).toBeUndefined();
+    expect(session.rowById(1)?.path).toBe('C:/x/b');
+    // A removed path may come back as a new row, a kept path may not be duplicated.
+    backend.emit!(batchOf('C:/x/a', 'C:/x/b'));
+    expect(session.rows.map((row) => row.path)).toEqual(['C:/x/b', 'C:/x/a']);
+  });
+
+  it('removes 5,000 of 100,000 rows quickly', () => {
+    const session = startedSession();
+    const paths = Array.from({ length: 100_000 }, (_, i) => `C:/x/file${i}`);
+    backend.emit!(batchOf(...paths));
+    const doomed = new Set(paths.filter((_, i) => i % 20 === 0));
+    expect(doomed.size).toBe(5_000);
+    // The suite fakes timers, which also freezes performance.now(), so time with the real clock.
+    vi.useRealTimers();
+    const startedAt = performance.now();
+    session.removeRows(doomed);
+    const elapsedMs = performance.now() - startedAt;
+    console.log(`removeRows 5,000 of 100,000: ${elapsedMs.toFixed(2)} ms`);
+    expect(session.rows).toHaveLength(95_000);
+    expect(elapsedMs).toBeLessThan(100);
+  });
+});
+
 describe('stopping a search', () => {
   it('marks the session as stopping right away and tells the backend once', () => {
     const session = startedSession();

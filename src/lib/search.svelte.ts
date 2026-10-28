@@ -112,13 +112,30 @@ export class SearchSession {
 
   /** Takes a row out of the results, for example after its file was deleted from the system menu. */
   removeRow(path: string) {
-    const removed = this.rows.find((row) => row.path === path);
-    if (removed) {
-      this.rowsById.delete(removed.id);
-      for (const listener of this.listeners) listener.removed(removed.id);
+    this.removeRows([path]);
+  }
+
+  /**
+   * Takes many rows out of the results in one pass. Unknown paths are ignored. Listeners hear one
+   * removal per row in the rows' order, after rows already holds the final list.
+   */
+  removeRows(paths: ReadonlySet<string> | string[]) {
+    const doomedPaths = paths instanceof Set ? paths : new Set(paths);
+    if (doomedPaths.size === 0) return;
+    const kept: DisplayRow[] = [];
+    const removed: DisplayRow[] = [];
+    for (const row of this.rows) {
+      (doomedPaths.has(row.path) ? removed : kept).push(row);
     }
-    this.rows = this.rows.filter((row) => row.path !== path);
-    this.seenPaths.delete(path);
+    if (removed.length === 0) return;
+    this.rows = kept;
+    for (const row of removed) {
+      this.rowsById.delete(row.id);
+      this.seenPaths.delete(row.path);
+    }
+    for (const row of removed) {
+      for (const listener of this.listeners) listener.removed(row.id);
+    }
   }
 
   /** Dismisses the notice without cancelling anything. The search is still stopping. */
