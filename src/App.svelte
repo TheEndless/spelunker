@@ -38,6 +38,18 @@
   import { SavedSearchStore } from './lib/savedSearchStore.svelte';
   import { describeSearchState } from './lib/searchAnnouncement';
   import { SearchSession } from './lib/search.svelte';
+  import {
+    EMPTY_SELECTION,
+    moveCurrent,
+    pressRow,
+    pruneSelection,
+    releaseRow,
+    selectAll,
+    selectOnly,
+    toggleCurrent,
+    type Modifiers,
+    type SelectionState,
+  } from './lib/selection';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { withShortcut } from './lib/shortcuts';
   import Splitter from './lib/Splitter.svelte';
@@ -98,7 +110,9 @@
   const shownPanes = $derived<PaneId[]>(
     PANE_ORDER.filter((pane) => (pane !== 'preview' || !preferences.previewCollapsed) && (pane !== 'map' || mapShown)),
   );
-  let selectedPath = $state<string | null>(null);
+  /** The results selection. Its current row drives everything that shows one file. */
+  let selection = $state.raw<SelectionState>(EMPTY_SELECTION);
+  const selectedPath = $derived(selection.current);
   /** The criteria of the search whose results are on screen, used to explain an empty list. */
   let searchedCriteria = $state.raw<Criteria | null>(null);
   /** The app's own file menu, used only where Windows' menu is unavailable (a plain browser). */
@@ -136,6 +150,34 @@
     selectedRowHint = findRowIndex(rows, selectedPath, selectedRowHint);
     return selectedRowHint >= 0 ? rows[selectedRowHint] : null;
   });
+
+  function pressResultRow(index: number, modifiers: Modifiers) {
+    selection = pressRow(selection, session.sortedRows, index, modifiers);
+  }
+
+  function releaseResultRow(index: number, modifiers: Modifiers, pressedOnSelected: boolean) {
+    selection = releaseRow(selection, session.sortedRows, index, modifiers, pressedOnSelected);
+  }
+
+  function moveCurrentRow(targetIndex: number, modifiers: Modifiers) {
+    selection = moveCurrent(selection, session.sortedRows, targetIndex, modifiers);
+  }
+
+  function toggleCurrentRow() {
+    selection = toggleCurrent(selection);
+  }
+
+  function selectAllRows() {
+    selection = selectAll(selection, session.sortedRows);
+  }
+
+  /** Takes rows whose files are gone out of the results, and out of the selection. */
+  function removeVanishedRows(paths: string[]) {
+    if (paths.length === 0) return;
+    session.removeRows(paths);
+    selection = pruneSelection(selection, session.rows);
+  }
+
   const canExport = $derived(!session.running && session.rows.length > 0);
 
   $effect(() => applyTheme(preferences.theme, preferences.palette, preferences.highlightColor));
@@ -187,7 +229,7 @@
     if (!request.ok) return;
     preferences.rememberFolders();
     preferences.save();
-    selectedPath = null;
+    selection = EMPTY_SELECTION;
     searchedCriteria = $state.snapshot(preferences.criteria);
     session.start(request.value);
   }
@@ -322,7 +364,7 @@
       const result = await showShellMenu(row.path, x, y, actions.map((action) => action.label));
       if (result.extra !== null) actions[result.extra]?.run();
       // A shell command such as Delete or Rename can remove the file, so drop its row if it is gone.
-      if (result.ranShellCommand && !(await pathExists(row.path))) session.removeRow(row.path);
+      if (result.ranShellCommand && !(await pathExists(row.path))) removeVanishedRows([row.path]);
     } catch (error) {
       say('error', String(error));
     }
@@ -394,7 +436,7 @@
       <section class="results" data-pane="results" aria-label="Results">
         <ResultsList
           rows={session.sortedRows}
-          {selectedPath}
+          {selection}
           {revealRequest}
           sortColumn={session.sortColumn}
           sortDirection={session.sortDirection}
@@ -407,7 +449,11 @@
             preferences.saveSoon();
           }}
           onSort={(column) => session.toggleSort(column)}
-          onSelect={(row) => (selectedPath = row.path)}
+          onPress={(_, index, modifiers) => pressResultRow(index, modifiers)}
+          onRelease={(_, index, modifiers, pressedOnSelected) => releaseResultRow(index, modifiers, pressedOnSelected)}
+          onMove={moveCurrentRow}
+          onToggleCurrent={toggleCurrentRow}
+          onSelectAll={selectAllRows}
           onOpen={(row) => openPath(row.path)}
           onContextMenu={showRowMenu}
         />
@@ -449,7 +495,7 @@
               preferences.save();
             }}
             onSelect={(row) => {
-              selectedPath = row.path;
+              selection = selectOnly(row.path);
               revealRequest = { path: row.path, token: ++revealToken };
             }}
             onOpen={(row) => openPath(row.path)}
@@ -535,7 +581,6 @@
 {/if}
 
 <div class="sr-only" id="search-announcement" role="status" aria-live="polite">{announcement}</div>
-
 <StoppingDialog visible={session.stoppingNoticeVisible} onHide={() => session.hideStoppingNotice()} />
 
 {#if settingsOpen}

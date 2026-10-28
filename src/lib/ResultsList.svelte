@@ -22,16 +22,18 @@
   import type { EmptyState } from './emptyState';
   import FileIcon from './FileIcon.svelte';
   import { formatSize, modifiedLabel } from './format';
-  import { nextRowIndex } from './gridNavigation';
+  import { gridKeyAction, modifiersOf, NO_MODIFIERS, type RowPress } from './listSelectionInput';
   import { findRowIndex } from './rowLookup';
   import Icon from './Icon.svelte';
+  import type { Modifiers, SelectionState } from './selection';
   import { canvasMeasurer, fitMiddle } from './textFit';
   import type { DisplayRow, SortColumn, SortDirection } from './types';
   import { visibleWindow } from './virtualList';
 
   interface Props {
     rows: DisplayRow[];
-    selectedPath: string | null;
+    /** Owned by the app. The list only reports presses, releases and keys. */
+    selection: SelectionState;
     sortColumn: SortColumn | null;
     sortDirection: SortDirection;
     running: boolean;
@@ -41,8 +43,19 @@
     layout: ColumnLayout;
     onLayout: (layout: ColumnLayout) => void;
     onSort: (column: SortColumn) => void;
-    onSelect: (row: DisplayRow) => void;
+    /** A left-button press on row `index`, or the press half of a right-click or a scripted click. */
+    onPress: (row: DisplayRow, index: number, modifiers: Modifiers) => void;
+    /** The click that ends a press on the same row, when the press did not turn into a drag. */
+    onRelease: (row: DisplayRow, index: number, modifiers: Modifiers, pressedOnSelected: boolean) => void;
+    /** A movement key moved the current row to `targetIndex`. */
+    onMove: (targetIndex: number, modifiers: Modifiers) => void;
+    onToggleCurrent: () => void;
+    onSelectAll: () => void;
+    /** Hears every row press, for logic that follows the pointer after it (a drag). */
+    onRowPress?: (press: RowPress) => void;
+    /** Enter opens the current row, a double-click the clicked one. */
     onOpen: (row: DisplayRow) => void;
+    /** The app decides whether the menu applies to the selection or to this row alone. */
     onContextMenu: (row: DisplayRow, x: number, y: number) => void | Promise<void>;
     /** Scrolls the list to a row picked elsewhere (the map). A new token asks again for the same path. */
     revealRequest?: { path: string; token: number } | null;
@@ -50,7 +63,7 @@
 
   let {
     rows,
-    selectedPath,
+    selection,
     sortColumn,
     sortDirection,
     running,
@@ -59,7 +72,12 @@
     layout,
     onLayout,
     onSort,
-    onSelect,
+    onPress,
+    onRelease,
+    onMove,
+    onToggleCurrent,
+    onSelectAll,
+    onRowPress,
     onOpen,
     onContextMenu,
     revealRequest = null,
@@ -77,7 +95,7 @@
   const HEADING_EXTRA = 24;
   /** Room for the file icon in front of a name. */
   const ICON_EXTRA = 24;
-  /** How far the pointer must travel before a press on a heading counts as a drag. */
+  /** How far the pointer must travel before a press on a heading or a row counts as a drag. */
   const DRAG_THRESHOLD = 5;
 
   interface Column {
@@ -134,17 +152,17 @@
     }),
   );
   const rendered = $derived(rows.slice(scrollWindow.start, scrollWindow.end));
-  /** Where the selected row was last time, so a growing list is not searched again from the start. */
-  let selectedIndexHint = -1;
-  const selectedIndex = $derived.by(() => {
-    selectedIndexHint = findRowIndex(rows, selectedPath, selectedIndexHint);
-    return selectedIndexHint;
+  /** Where the current row was last time, so a growing list is not searched again from the start. */
+  let currentIndexHint = -1;
+  const currentIndex = $derived.by(() => {
+    currentIndexHint = findRowIndex(rows, selection.current, currentIndexHint);
+    return currentIndexHint;
   });
 
   const rowId = (index: number) => `result-row-${index}`;
-  /** Screen readers follow the selected row only while it is on screen, since off-screen rows are not rendered. */
+  /** Screen readers follow the current row only while it is on screen, since off-screen rows are not rendered. */
   const activeDescendant = $derived(
-    selectedIndex >= scrollWindow.start && selectedIndex < scrollWindow.end ? rowId(selectedIndex) : undefined,
+    currentIndex >= scrollWindow.start && currentIndex < scrollWindow.end ? rowId(currentIndex) : undefined,
   );
 
   function cell(row: DisplayRow, id: ColumnId): string {
@@ -341,7 +359,7 @@
     scrollTop = scroller.scrollTop;
   }
 
-  // After the user sorts, the selected row has moved. Bring it back into view so it stays reachable.
+  // After the user sorts, the current row has moved. Bring it back into view so it stays reachable.
   let lastSort: string | undefined;
   $effect(() => {
     const currentSort = `${sortColumn}/${sortDirection}`;
@@ -349,7 +367,7 @@
     lastSort = currentSort;
     if (!changed) return;
     queueMicrotask(() => {
-      if (selectedIndex >= 0) revealIndex(selectedIndex);
+      if (currentIndex >= 0) revealIndex(currentIndex);
     });
   });
 
@@ -365,11 +383,12 @@
     });
   });
 
-  function openContextMenuAtSelection(): void | Promise<void> {
-    const row = rows[selectedIndex];
+  /** The keyboard's menu, anchored on the current row. The app decides whether it covers the selection. */
+  function openContextMenuAtCurrent(): void | Promise<void> {
+    const row = rows[currentIndex];
     if (!row) return;
-    revealIndex(selectedIndex);
-    const anchor = document.getElementById(rowId(selectedIndex)) ?? scroller;
+    revealIndex(currentIndex);
+    const anchor = document.getElementById(rowId(currentIndex)) ?? scroller;
     const box = anchor.getBoundingClientRect();
     return onContextMenu(row, box.left + 32, box.bottom);
   }
@@ -389,30 +408,80 @@
   function onGridContextMenu(event: MouseEvent) {
     event.preventDefault();
     if (event.target !== scroller) return;
-    // A mouse right-click on the empty space below the rows is not a request for the selected file's menu.
+    // A mouse right-click on the empty space below the rows is not a request for the current file's menu.
     if (event.button === 2) return;
     if (performance.now() - keyboardMenuAt < KEY_ECHO_MS) return;
-    openContextMenuAtSelection();
+    openContextMenuAtCurrent();
   }
 
   function onKeydown(event: KeyboardEvent) {
-    // Keys pressed on a column heading belong to the heading, not to the rows.
+    // Keys pressed on a column heading belong to the heading, not to the rows. That also keeps
+    // Ctrl+A for the grid alone, so the text boxes keep their own select all.
     if (event.target !== scroller) return;
     const page = Math.max(1, Math.floor((viewportHeight - HEADER_HEIGHT) / ROW_HEIGHT) - 1);
-    const next = nextRowIndex(event.key, selectedIndex, rows.length, page);
-    if (next !== null) {
-      onSelect(rows[next]);
-      revealIndex(next);
-      event.preventDefault();
-    } else if (event.key === 'Enter') {
-      const selected = rows[selectedIndex];
-      if (selected) onOpen(selected);
-      event.preventDefault();
-    } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+    const action = gridKeyAction(event, currentIndex, rows.length, page);
+    if (!action) return;
+    event.preventDefault();
+    if (action.kind === 'move') {
+      onMove(action.targetIndex, action.modifiers);
+      revealIndex(action.targetIndex);
+    } else if (action.kind === 'selectAll') {
+      onSelectAll();
+    } else if (action.kind === 'toggleCurrent') {
+      onToggleCurrent();
+    } else if (action.kind === 'open') {
+      const current = rows[currentIndex];
+      if (current) onOpen(current);
+    } else if (action.kind === 'menu') {
       keyboardMenuAt = performance.now();
-      void Promise.resolve(openContextMenuAtSelection()).finally(() => (keyboardMenuAt = performance.now()));
-      event.preventDefault();
+      void Promise.resolve(openContextMenuAtCurrent()).finally(() => (keyboardMenuAt = performance.now()));
     }
+  }
+
+  // ---- pressing and clicking rows
+
+  /** The last left-button press on a row, until its click. Plain data: nothing renders from it. */
+  let rowPress: RowPress | null = null;
+
+  /** Selects at once what a press selects (an unselected row, a Shift range), and watches for a drag. */
+  function onRowPointerDown(event: PointerEvent, row: DisplayRow, index: number) {
+    if (event.button !== 0) return;
+    const press: RowPress = {
+      path: row.path,
+      index,
+      pressedOnSelected: selection.paths.has(row.path),
+      startX: event.clientX,
+      startY: event.clientY,
+      dragged: false,
+    };
+    rowPress = press;
+    onPress(row, index, modifiersOf(event));
+    onRowPress?.(press);
+    trackPointer((moveEvent) => {
+      if (Math.hypot(moveEvent.clientX - press.startX, moveEvent.clientY - press.startY) >= DRAG_THRESHOLD) press.dragged = true;
+    });
+  }
+
+  /** Finishes a press with the release rules, unless the press became a drag. */
+  function onRowClick(event: MouseEvent, row: DisplayRow, index: number) {
+    const press = rowPress;
+    rowPress = null;
+    const modifiers = modifiersOf(event);
+    if (press?.path !== row.path) {
+      // A click with no press before it (a script's element.click()) is a whole press and release.
+      const pressedOnSelected = selection.paths.has(row.path);
+      onPress(row, index, modifiers);
+      onRelease(row, index, modifiers, pressedOnSelected);
+    } else if (!press.dragged) {
+      onRelease(row, index, modifiers, press.pressedOnSelected);
+    }
+  }
+
+  /** A right-click on an unselected row selects it alone. On a selected row the selection stays. */
+  function onRowContextMenu(event: MouseEvent, row: DisplayRow, index: number) {
+    event.preventDefault();
+    onPress(row, index, NO_MODIFIERS);
+    onContextMenu(row, event.clientX, event.clientY);
   }
 
   function openColumnMenuAt(element: Element) {
@@ -520,6 +589,7 @@
     class="scroller"
     role="grid"
     aria-label="Search results"
+    aria-multiselectable="true"
     aria-rowcount={Math.max(rows.length, 1) + 1}
     aria-colcount={columns.length}
     aria-activedescendant={activeDescendant}
@@ -595,6 +665,7 @@
         <div class="window" style:transform="translateY({scrollWindow.offsetY}px)">
           {#each rendered as row, offset (row.path)}
             {@const index = scrollWindow.start + offset}
+            {@const selected = selection.paths.has(row.path)}
             <!-- Keyboard access is handled once on the grid (arrows, Enter, Menu key), not per row. -->
             <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
             <div
@@ -602,17 +673,15 @@
               role="row"
               id={rowId(index)}
               aria-rowindex={index + 2}
-              aria-selected={index === selectedIndex}
-              class:selected={index === selectedIndex}
+              aria-selected={selected}
+              class:selected
+              class:current={index === currentIndex}
               style:grid-template-columns={gridTemplate}
               style:height="{ROW_HEIGHT}px"
-              onclick={() => onSelect(row)}
+              onpointerdown={(event) => onRowPointerDown(event, row, index)}
+              onclick={(event) => onRowClick(event, row, index)}
               ondblclick={() => onOpen(row)}
-              oncontextmenu={(event) => {
-                event.preventDefault();
-                onSelect(row);
-                onContextMenu(row, event.clientX, event.clientY);
-              }}
+              oncontextmenu={(event) => onRowContextMenu(event, row, index)}
             >
               {#each columns as column, columnIndex (column.id)}
                 <div
@@ -783,12 +852,18 @@
     align-items: center;
     border-left: 3px solid transparent;
     cursor: default;
+    /* Pressing and dragging across rows selects rows or files, never a sweep of page text. */
+    user-select: none;
   }
   .row:hover {
     background: var(--row-hover);
   }
   .row.selected {
     background: var(--row-selected);
+    border-left-color: color-mix(in srgb, var(--row-selected-edge) 35%, transparent);
+  }
+  /* The current row has the full edge, also when Ctrl moved it onto an unselected row. */
+  .row.current {
     border-left-color: var(--row-selected-edge);
   }
   .cell {

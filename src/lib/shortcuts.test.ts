@@ -38,6 +38,20 @@ describe('SHORTCUTS', () => {
     expect(results).toContain('Backspace on the map');
   });
 
+  it('lists the selection gestures in the Results group', () => {
+    const results = shortcutsInGroup('Results').map((shortcut) => shortcut.keys);
+    expect(results).toContain('Shift+click or Shift+arrow keys');
+    expect(results).toContain('Ctrl+click');
+    expect(results).toContain('Ctrl+A');
+    expect(results).toContain('Ctrl+arrow keys, then Ctrl+Space');
+  });
+
+  it('says Enter and the menu act on the current row and the selection', () => {
+    const results = shortcutsInGroup('Results');
+    expect(results).toContainEqual({ keys: 'Enter', action: 'Open the current file', group: 'Results' });
+    expect(results.find((shortcut) => shortcut.keys === 'Menu key or Shift+F10')?.action).toBe('Open the context menu for the selected files');
+  });
+
   it('names which splitter each splitter key belongs to', () => {
     const panes = shortcutsInGroup('Panes').map((shortcut) => shortcut.keys);
     expect(panes).toContain('Left or Right on the preview splitter');
