@@ -65,8 +65,14 @@ describe('LayoutIndex', () => {
     const layout = layoutTree(tree.root, { files: tree.fileCount, folders: tree.folderCount }, {
       width: 1600, height: 500, metric: 'size', now: 0, minLeafArea: 0, minFolderSide: 0, inset: 0, insetMinSide: Infinity,
     });
-    const started = performance.now();
-    new LayoutIndex(layout, 1600, 500);
-    expect(performance.now() - started).toBeLessThan(50);
+    // The fastest of a few builds measures the code. A single build also measures whatever else
+    // the machine is doing, and went over 50 ms when other test runs shared the processor.
+    let fastest = Infinity;
+    for (let round = 0; round < 5; round++) {
+      const started = performance.now();
+      new LayoutIndex(layout, 1600, 500);
+      fastest = Math.min(fastest, performance.now() - started);
+    }
+    expect(fastest).toBeLessThan(50);
   });
 });

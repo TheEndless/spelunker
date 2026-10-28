@@ -101,12 +101,18 @@ describe('shadeChannel', () => {
   });
 
   it('rounds exactly as Math.round clamped to 0..255 would, over every base and a fine brightness sweep', () => {
+    // Mismatches are collected and asserted once. An expect per case (345,000 of them) took long
+    // enough to pass the 5 second test timeout on a busy machine.
+    const mismatches: string[] = [];
     for (let base = 0; base <= 255; base++) {
       for (let step = -50; step <= 1300; step++) {
         const brightness = step / 1000;
-        expect(shadeChannel(base, brightness)).toBe(Math.min(255, Math.max(0, Math.round(base * brightness))));
+        const expected = Math.min(255, Math.max(0, Math.round(base * brightness)));
+        const actual = shadeChannel(base, brightness);
+        if (actual !== expected) mismatches.push(`base ${base}, brightness ${brightness}: ${actual} instead of ${expected}`);
       }
     }
+    expect(mismatches).toEqual([]);
     expect(shadeChannel(1e12, 1)).toBe(255);
     expect(shadeChannel(-1e12, 1)).toBe(0);
   });
