@@ -55,7 +55,8 @@
     onSelectAll: () => void;
     /**
      * A press on a row became a drag of files out of the window: the whole selection in list order
-     * when the pressed row was selected, otherwise just that row. Resolves when the drag has ended.
+     * when the pressed row is in the selection the press left (also after a Ctrl or Shift press),
+     * otherwise just that row. Resolves when the drag has ended.
      */
     onDragOut: (paths: string[]) => Promise<void>;
     /** Enter opens the current row, a double-click the clicked one. */
@@ -484,7 +485,9 @@
     };
     rowPress = press;
     onPress(row, index, modifiersOf(event));
-    fileDrag.press({ x: event.clientX, y: event.clientY }, row.path, press.pressedOnSelected, () =>
+    // Read when the drag starts, so it is the selection after this press (a Ctrl press added the
+    // row, a Shift press selected a range).
+    fileDrag.press({ x: event.clientX, y: event.clientY }, row.path, () =>
       selectedRows(selection, rows).map((selectedRow) => selectedRow.path),
     );
     const forget = () => {
@@ -524,11 +527,13 @@
 
   /** Finishes a press with the release rules, unless the press became a drag. */
   function onRowClick(event: MouseEvent, row: DisplayRow, index: number) {
-    const press = rowPress;
+    // A click no pointer made (detail 0: assistive technology, or a script's element.click()) has
+    // no press of its own, so a press left over from a drag must not swallow it.
+    const press = event.detail === 0 ? null : rowPress;
     rowPress = null;
     const modifiers = modifiersOf(event);
     if (press?.path !== row.path) {
-      // A click with no press before it (a script's element.click()) is a whole press and release.
+      // A click with no press before it is a whole press and release.
       const pressedOnSelected = selection.paths.has(row.path);
       onPress(row, index, modifiers);
       onRelease(row, index, modifiers, pressedOnSelected);

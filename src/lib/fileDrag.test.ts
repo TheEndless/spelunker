@@ -79,9 +79,9 @@ const THRESHOLD = 5;
 const SELECTION = ['C:\\a\\one.txt', 'C:\\b\\two.txt', 'C:\\a\\three.txt'];
 const origin = { x: 100, y: 100 };
 
-function pressedGesture(pressedOnSelected = true, rowPath = SELECTION[1]) {
+function pressedGesture(rowPath = SELECTION[1]) {
   const gesture = createDragGesture({ threshold: THRESHOLD });
-  gesture.press(origin, rowPath, pressedOnSelected, () => SELECTION);
+  gesture.press(origin, rowPath, () => SELECTION);
   return gesture;
 }
 
@@ -109,15 +109,15 @@ describe('createDragGesture', () => {
     expect(gesture.move({ x: 100, y: 100 }, PRIMARY)).toEqual({ kind: 'none' });
   });
 
-  it('drags the whole selection in the given order when the pressed row was selected', () => {
-    const gesture = pressedGesture(true, SELECTION[2]);
+  it('drags the whole selection in the given order when the pressed row is in it', () => {
+    const gesture = pressedGesture(SELECTION[2]);
     expect(gesture.move({ x: 130, y: 100 }, PRIMARY)).toEqual({ kind: 'start', paths: SELECTION });
   });
 
   it('reads the selection when the drag starts, not on every press', () => {
     let reads = 0;
     const gesture = createDragGesture({ threshold: THRESHOLD });
-    gesture.press(origin, SELECTION[0], true, () => {
+    gesture.press(origin, SELECTION[0], () => {
       reads++;
       return SELECTION;
     });
@@ -126,14 +126,24 @@ describe('createDragGesture', () => {
     expect(reads).toBe(1);
   });
 
-  it('drags only the pressed row when it was not selected', () => {
-    const gesture = pressedGesture(false, 'C:\\c\\alone.txt');
+  it('drags the selection as it is when the drag starts, after the press changed it', () => {
+    // A Ctrl press on an unselected row adds it to the selection, which the list reports after the press.
+    let selection: readonly string[] = SELECTION;
+    const added = 'C:\\c\\added.txt';
+    const gesture = createDragGesture({ threshold: THRESHOLD });
+    gesture.press(origin, added, () => selection);
+    selection = [SELECTION[0], SELECTION[1], added, SELECTION[2]];
+    expect(gesture.move({ x: 130, y: 100 }, PRIMARY)).toEqual({ kind: 'start', paths: [SELECTION[0], SELECTION[1], added, SELECTION[2]] });
+  });
+
+  it('drags only the pressed row when it is absent from the selection', () => {
+    const gesture = pressedGesture('C:\\c\\alone.txt');
     expect(gesture.move({ x: 130, y: 100 }, PRIMARY)).toEqual({ kind: 'start', paths: ['C:\\c\\alone.txt'] });
   });
 
-  it('drags the pressed row when the selection it was part of turns out empty', () => {
+  it('drags the pressed row when the selection is empty', () => {
     const gesture = createDragGesture({ threshold: THRESHOLD });
-    gesture.press(origin, SELECTION[0], true, () => []);
+    gesture.press(origin, SELECTION[0], () => []);
     expect(gesture.move({ x: 130, y: 100 }, PRIMARY)).toEqual({ kind: 'start', paths: [SELECTION[0]] });
   });
 
@@ -175,20 +185,20 @@ describe('createDragGesture', () => {
   it('starts again for the next press after a drag', () => {
     const gesture = pressedGesture();
     expect(gesture.move({ x: 130, y: 100 }, PRIMARY).kind).toBe('start');
-    gesture.press(origin, 'C:\\c\\next.txt', false, () => SELECTION);
+    gesture.press(origin, 'C:\\c\\next.txt', () => SELECTION);
     expect(gesture.move({ x: 130, y: 100 }, PRIMARY)).toEqual({ kind: 'start', paths: ['C:\\c\\next.txt'] });
   });
 
   it('measures from the new press point, not the old one', () => {
     const gesture = pressedGesture();
-    gesture.press({ x: 300, y: 300 }, SELECTION[0], false, () => SELECTION);
+    gesture.press({ x: 300, y: 300 }, SELECTION[0], () => SELECTION);
     expect(gesture.move({ x: 302, y: 301 }, PRIMARY)).toEqual({ kind: 'none' });
   });
 
   it('hands out a copy, so later changes to the selection list do not reach the drag', () => {
     const live = [...SELECTION];
     const gesture = createDragGesture({ threshold: THRESHOLD });
-    gesture.press(origin, live[0], true, () => live);
+    gesture.press(origin, live[0], () => live);
     const step = gesture.move({ x: 130, y: 100 }, PRIMARY);
     live.pop();
     expect(step).toEqual({ kind: 'start', paths: SELECTION });

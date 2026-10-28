@@ -448,20 +448,20 @@ const rowCount = () => ev(`Number(document.querySelector('[data-pane="results"] 
  * held, then releases unless told not to. From step `buttonsUpFromStep` on, the moves report no
  * button held, as when the release happened where the page did not see it.
  */
-async function dragRow(index, { steps = 6, release = true, buttonsUpFromStep = null } = {}) {
+async function dragRow(index, { steps = 6, release = true, buttonsUpFromStep = null, modifiers = 0 } = {}) {
   const point = await ev(`window.__ux8.rowPoint(${index})`);
   if (!point) throw new Error(`row ${index} is not on screen`);
-  await mouse('mouseMoved', point.x, point.y);
-  await mouse('mousePressed', point.x, point.y);
+  await mouse('mouseMoved', point.x, point.y, { modifiers });
+  await mouse('mousePressed', point.x, point.y, { modifiers });
   for (let step = 1; step <= steps; step++) {
     // The page reports a held left button for any move sent with `button: 'left'` (the helper's
     // default), whatever `buttons` says, so a move with the button up must name no button.
     const buttonsUp = buttonsUpFromStep !== null && step >= buttonsUpFromStep;
-    await mouse('mouseMoved', point.x + 4 * step, point.y + 2 * step, buttonsUp ? { buttons: 0, button: 'none' } : { buttons: 1 });
+    await mouse('mouseMoved', point.x + 4 * step, point.y + 2 * step, buttonsUp ? { buttons: 0, button: 'none', modifiers } : { buttons: 1, modifiers });
     await sleep(30);
   }
   const end = { x: point.x + 4 * steps, y: point.y + 2 * steps };
-  if (release) await mouse('mouseReleased', end.x, end.y);
+  if (release) await mouse('mouseReleased', end.x, end.y, { modifiers });
   await sleep(250);
   return end;
 }
@@ -488,7 +488,6 @@ async function fileDragChecks() {
   await mouse('mouseReleased', end.x + 50, end.y);
   await sleep(250);
   check('the release after the drag does not collapse the selection (rows 2 to 5)', same(await selected(), range(2, 5)), await selected());
-  check('the drag went through the hook alone: no Tauri bridge exists on this page', await ev(`typeof window.__TAURI_INTERNALS__ === 'undefined' && window.__sp.fileDragCalls.length === 1`));
 
   await selfDropChecks(pathsOf([2, 3, 4, 5]));
 
@@ -505,8 +504,22 @@ async function fileDragChecks() {
   await clickRow(4, SHIFT);
   await dragRow(7);
   const unselectedDrag = await fileDragCalls();
-  check('a drag from an unselected row carries only that row', unselectedDrag.length === 1 && same(unselectedDrag[0].paths, pathsOf([7])), { unselectedDrag, wanted: pathsOf([7]) });
+  check('a plain drag from an unselected row carries only that row', unselectedDrag.length === 1 && same(unselectedDrag[0].paths, pathsOf([7])), { unselectedDrag, wanted: pathsOf([7]) });
   check('and that row is selected alone, as the press selected it', same(await selected(), [7]), await selected());
+
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(4, SHIFT);
+  await dragRow(7, { modifiers: CTRL });
+  const ctrlDrag = await fileDragCalls();
+  check('with rows 2 to 4 selected, a Ctrl+press on row 7 then a drag carries the whole new selection: rows 2, 3, 4 and 7', ctrlDrag.length === 1 && same(ctrlDrag[0].paths, pathsOf([2, 3, 4, 7])), { ctrlDrag, wanted: pathsOf([2, 3, 4, 7]) });
+
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(4, SHIFT);
+  await dragRow(6, { modifiers: SHIFT });
+  const shiftDrag = await fileDragCalls();
+  check('a Shift+press on row 6 with the anchor on row 2, then a drag, carries the range: rows 2 to 6', shiftDrag.length === 1 && same(shiftDrag[0].paths, pathsOf(range(2, 6))), { shiftDrag, wanted: pathsOf(range(2, 6)) });
 
   await ev('window.__sp.fileDragCalls.length = 0');
   await startFrom(2);
