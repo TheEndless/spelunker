@@ -2,10 +2,10 @@
   import { onMount, tick, untrack } from 'svelte';
   import {
     copyText,
+    existingPaths,
     hasShellMenu,
     openInEditor,
     openPath,
-    pathExists,
     previewFile,
     revealPath,
     saveTextFile,
@@ -23,6 +23,7 @@
   import { exportFileName, formatResults, type ExportFormat } from './lib/exportResults';
   import HorizontalSplitter from './lib/HorizontalSplitter.svelte';
   import Icon from './lib/Icon.svelte';
+  import { menuRowsFor } from './lib/listSelectionInput';
   import { PANE_ORDER, nextPane, type PaneId } from './lib/paneCycle';
   import { GRID_MIN_HEIGHT, MAP_MIN_HEIGHT, mapFits } from './lib/paneSplit';
   import { applyTheme, Preferences } from './lib/preferences.svelte';
@@ -118,7 +119,7 @@
   /** The criteria of the search whose results are on screen, used to explain an empty list. */
   let searchedCriteria = $state.raw<Criteria | null>(null);
   /** The app's own file menu, used only where Windows' menu is unavailable (a plain browser). */
-  let menu = $state<{ row: DisplayRow; x: number; y: number } | null>(null);
+  let menu = $state.raw<{ rows: DisplayRow[]; x: number; y: number } | null>(null);
   let settingsOpen = $state(false);
   let notice = $state<{ kind: 'info' | 'error'; text: string } | null>(null);
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -379,8 +380,15 @@
     }
   }
 
-  /** The entries Spelunker adds above Windows' own menu. */
-  function extraActions(row: DisplayRow): { label: string; run: () => void }[] {
+  /** The entries Spelunker adds above Windows' own menu. Several rows share only the copy entries. */
+  function extraActions(rows: DisplayRow[]): { label: string; run: () => void }[] {
+    if (rows.length > 1) {
+      return [
+        { label: 'Copy paths', run: () => void copy(rows.map((row) => row.path).join('\r\n')) },
+        { label: 'Copy names', run: () => void copy(rows.map((row) => row.name).join('\r\n')) },
+      ];
+    }
+    const row = rows[0];
     const actions = [
       { label: 'Open containing folder', run: () => void revealPath(row.path) },
       { label: 'Copy path', run: () => void copy(row.path) },
@@ -390,18 +398,26 @@
     return actions;
   }
 
-  /** `origin` is the pane the menu was asked for from, which gets focus back when the menu closes. */
+  /**
+   * The menu for `row`, which covers the whole selection when the row is part of it. `origin` is the
+   * pane the menu was asked for from, which gets focus back when the menu closes.
+   */
   async function showRowMenu(row: DisplayRow, x: number, y: number, origin: PaneId = 'results') {
+    const rows = menuRowsFor(selection, session.sortedRows, row);
     if (!hasShellMenu) {
-      menu = { row, x, y };
+      menu = { rows, x, y };
       return;
     }
-    const actions = extraActions(row);
+    const actions = extraActions(rows);
+    const paths = rows.map((chosen) => chosen.path);
     try {
-      const result = await showShellMenu(row.path, x, y, actions.map((action) => action.label));
+      const result = await showShellMenu(paths, x, y, actions.map((action) => action.label));
       if (result.extra !== null) actions[result.extra]?.run();
-      // A shell command such as Delete or Rename can remove the file, so drop its row if it is gone.
-      if (result.ranShellCommand && !(await pathExists(row.path))) removeVanishedRows([row.path]);
+      // A shell command such as Delete or Rename can remove files, so drop the rows whose files are gone.
+      if (result.ranShellCommand) {
+        const remaining = new Set(await existingPaths(paths));
+        removeVanishedRows(paths.filter((path) => !remaining.has(path)));
+      }
     } catch (error) {
       say('error', String(error));
     }
@@ -629,12 +645,14 @@
 {/if}
 
 {#if menu}
-  {@const row = menu.row}
+  {@const rows = menu.rows}
+  {@const ownEntries = extraActions(rows).map((action) => ({ label: action.label, action: action.run }))}
+  <!-- Opening is offered for one file only. Several files share just the copy entries. -->
   <ContextMenu
     x={menu.x}
     y={menu.y}
     onClose={() => (menu = null)}
-    items={[{ label: 'Open', action: () => openPath(row.path) }, ...extraActions(row).map((action) => ({ label: action.label, action: action.run }))]}
+    items={rows.length === 1 ? [{ label: 'Open', action: () => openPath(rows[0].path) }, ...ownEntries] : ownEntries}
   />
 {/if}
 

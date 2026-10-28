@@ -1,9 +1,40 @@
 import { describe, expect, it } from 'vitest';
-import { gridKeyAction, modifiersOf, type GridKeyEvent } from './listSelectionInput';
+import { gridKeyAction, menuRowsFor, modifiersOf, type GridKeyEvent } from './listSelectionInput';
+import { EMPTY_SELECTION, type SelectionState } from './selection';
+
+const rows = ['a', 'b', 'c', 'd', 'e'].map((path) => ({ path, name: path.toUpperCase() }));
+
+function selection(current: string | null, ...paths: string[]): SelectionState {
+  return { anchor: current, current, paths: new Set(paths) };
+}
 
 function keyEvent(key: string, held: Partial<Omit<GridKeyEvent, 'key'>> = {}): GridKeyEvent {
   return { key, ctrlKey: false, shiftKey: false, altKey: false, ...held };
 }
+
+describe('menuRowsFor', () => {
+  it('gives the whole selection in list order when the clicked row is selected', () => {
+    const chosen = menuRowsFor(selection('d', 'd', 'b', 'e'), rows, rows[3]);
+    expect(chosen.map((row) => row.path)).toEqual(['b', 'd', 'e']);
+  });
+
+  it('gives just the clicked row when it is not selected', () => {
+    expect(menuRowsFor(selection('a', 'a', 'b'), rows, rows[4])).toEqual([rows[4]]);
+  });
+
+  it('gives just the clicked row when nothing is selected', () => {
+    expect(menuRowsFor(EMPTY_SELECTION, rows, rows[2])).toEqual([rows[2]]);
+  });
+
+  it('gives the one row when it is the only one selected', () => {
+    expect(menuRowsFor(selection('c', 'c'), rows, rows[2])).toEqual([rows[2]]);
+  });
+
+  it('falls back to the clicked row when the selection names it but the list does not', () => {
+    const outsider = { path: 'z', name: 'Z' };
+    expect(menuRowsFor(selection('z', 'z'), rows, outsider)).toEqual([outsider]);
+  });
+});
 
 describe('modifiersOf', () => {
   it('reads Ctrl and Shift from an event', () => {

@@ -119,12 +119,12 @@ check('PageUp from near the end moves up (clamped at the top for a short list)',
 // ---------- context menu from the keyboard
 // Inside the app the menu is Windows' own, requested over IPC (stubbed in PAGE_HELPERS, never shown).
 // The app's fallback menu only exists in a plain browser, so its keyboard model is checked there (mock.mjs).
-const menuCalls = () => ev(`window.__sp.shellMenuCalls.map((c) => ({ path: c.path, extras: c.extraLabels.length }))`);
+const menuCalls = () => ev(`window.__sp.shellMenuCalls.map((c) => ({ paths: c.paths, extras: c.extraLabels.length }))`);
 await ev(`window.__sp.shellMenuCalls.length = 0`);
 const rowBefore = await selectedName();
 await key('F10', { shift: true });
 const afterShiftF10 = await menuCalls();
-check('Shift+F10 asks for the context menu of the selected row', afterShiftF10.length === 1 && afterShiftF10[0].path.endsWith('\\' + rowBefore) && afterShiftF10[0].extras === 4, { afterShiftF10, rowBefore });
+check('Shift+F10 asks for the context menu of the selected row', afterShiftF10.length === 1 && afterShiftF10[0].paths.length === 1 && afterShiftF10[0].paths[0].endsWith('\\' + rowBefore) && afterShiftF10[0].extras === 4, { afterShiftF10, rowBefore });
 const focusAfterMenu = await ev(`document.activeElement.getAttribute('role')`);
 check('focus is back on the grid once the menu is gone', focusAfterMenu === 'grid', focusAfterMenu);
 await key('ContextMenu');

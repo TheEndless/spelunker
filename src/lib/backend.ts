@@ -133,9 +133,15 @@ export async function previewSource(path: string): Promise<string> {
   return convertFileSrc(path);
 }
 
-/** Whether a path still exists, used to drop a row after the system menu deleted or renamed the file. */
-export async function pathExists(path: string): Promise<boolean> {
-  return insideTauri ? invoke<boolean>('path_exists', { path }) : true;
+/**
+ * The given paths that still exist, used to drop rows after the system menu deleted or renamed
+ * files. The browser mock has no files to lose, so every path exists there.
+ * Until the batch `existing_paths` command exists (plan Task 6), each path is checked on its own.
+ */
+export async function existingPaths(paths: string[]): Promise<string[]> {
+  if (!insideTauri) return [...paths];
+  const found = await Promise.all(paths.map((path) => invoke<boolean>('path_exists', { path })));
+  return paths.filter((_, index) => found[index]);
 }
 
 /** Opens a file in the editor chosen in Settings, at a line. Without a command it opens normally. */
@@ -183,12 +189,10 @@ export interface ShellMenuResult {
   ranShellCommand: boolean;
 }
 
-/**
- * Shows Windows' own context menu for a file, with our `extraLabels` entries on top.
- * `x` and `y` are in CSS pixels relative to the window.
- */
+/** A request for Windows' own context menu, as the DEV hook records it. `x` and `y` are device pixels. */
 export interface ShellMenuRequest {
-  path: string;
+  /** Every file the menu applies to, in list order. */
+  paths: string[];
   x: number;
   y: number;
   extraLabels: string[];
@@ -204,13 +208,20 @@ declare global {
   }
 }
 
-export async function showShellMenu(path: string, x: number, y: number, extraLabels: string[]): Promise<ShellMenuResult> {
-  if (!insideTauri) return { extra: null, ranShellCommand: false };
+/**
+ * Shows Windows' own context menu for `paths`, with our `extraLabels` entries on top.
+ * `x` and `y` are in CSS pixels relative to the window.
+ */
+export async function showShellMenu(paths: string[], x: number, y: number, extraLabels: string[]): Promise<ShellMenuResult> {
+  if (!insideTauri || paths.length === 0) return { extra: null, ranShellCommand: false };
   const scale = window.devicePixelRatio || 1;
-  const request = { path, x: Math.round(x * scale), y: Math.round(y * scale), extraLabels };
+  const request: ShellMenuRequest = { paths, x: Math.round(x * scale), y: Math.round(y * scale), extraLabels };
   // The hook exists only in development builds, where the end-to-end scripts run. A release build drops it.
   const hook = import.meta.env.DEV ? window.__spShellMenuHook : undefined;
-  return hook ? hook(request) : invoke<ShellMenuResult>('show_shell_menu', request);
+  if (hook) return hook(request);
+  // The native command still takes one path, so the menu shows for the first file only. Plan Task 6
+  // makes it take every path, and this then passes `paths` through unchanged.
+  return invoke<ShellMenuResult>('show_shell_menu', { path: paths[0], x: request.x, y: request.y, extraLabels });
 }
 
 /** True when the system menu is available, so the app uses it instead of its own list. */

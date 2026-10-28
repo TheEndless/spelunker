@@ -1,9 +1,9 @@
 import { nextRowIndex } from './gridNavigation';
-import type { Modifiers } from './selection';
+import { selectedRows, type Modifiers, type SelectionState } from './selection';
 
 /**
- * The results list's input rules that need no page: which keys do what to the selection. The list
- * component only wires events to these.
+ * The results list's input rules that need no page: which keys do what to the selection, and which
+ * rows a context menu applies to. The list component only wires events to these.
  */
 
 export const NO_MODIFIERS: Modifiers = Object.freeze({ ctrl: false, shift: false });
@@ -56,4 +56,14 @@ export function gridKeyAction(event: GridKeyEvent, currentIndex: number, rowCoun
   if (event.key === 'Enter') return { kind: 'open' };
   if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) return { kind: 'menu' };
   return null;
+}
+
+/**
+ * The rows a context menu on `clicked` applies to: the whole selection in list order when the
+ * clicked row is part of it, otherwise that row alone.
+ */
+export function menuRowsFor<T extends { path: string }>(selection: SelectionState, rows: T[], clicked: T): T[] {
+  if (!selection.paths.has(clicked.path)) return [clicked];
+  const chosen = selectedRows(selection, rows);
+  return chosen.length > 0 ? chosen : [clicked];
 }
