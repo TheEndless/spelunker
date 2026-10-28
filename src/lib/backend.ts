@@ -51,6 +51,10 @@ export async function previewFile(
 }
 
 export async function openPath(path: string): Promise<void> {
+  // A test seam like the shell menu hook: end-to-end scripts record which file Enter or a double-click
+  // opens. A release build drops it. Outside Tauri opening does nothing, so there was nothing to observe.
+  const hook = import.meta.env.DEV ? window.__spOpenPathHook : undefined;
+  if (hook) return hook(path);
   if (insideTauri) await invoke('open_path', { path });
 }
 
@@ -208,6 +212,8 @@ declare global {
      * outside, so end-to-end scripts install this to answer the request without showing the menu.
      */
     __spShellMenuHook?: (request: ShellMenuRequest) => ShellMenuResult;
+    /** A test seam in development builds. Given the path of each file the app is asked to open, it replaces opening. */
+    __spOpenPathHook?: (path: string) => void;
   }
 }
 
