@@ -2,8 +2,11 @@
 //!
 //! The system menu and the native drag both start from a list of paths. This module turns the
 //! paths into absolute shell item ids, then into the shell's own multi-item objects: an item
-//! array, a data object (CF_HDROP and the shell formats), and a context menu object. COM must be
-//! initialized on the calling thread, and the objects belong to that thread.
+//! array, a data object (CF_HDROP and the shell formats), and a context menu object.
+//!
+//! Threading: everything here is created and used on the window thread, inside the COM (OLE)
+//! apartment that thread already has. The types are not `Send` (they hold raw item id pointers and
+//! apartment-bound COM interfaces), so the compiler keeps them on that thread.
 
 // The system menu and the native drag start using this in the next tasks. Until then only the
 // tests do, and this expectation fails the build once it is no longer needed.
@@ -12,6 +15,7 @@
     expect(dead_code, reason = "used by the multi-item menu and drag next")
 )]
 
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 use windows::core::{IUnknown, Interface, PCWSTR};
@@ -34,43 +38,99 @@ pub fn wide(text: &str) -> Vec<u16> {
 }
 
 /// Frees a shell item id list when it goes out of scope.
-pub struct ItemIdList(pub *mut ITEMIDLIST);
+pub struct ItemIdList(*mut ITEMIDLIST);
+impl ItemIdList {
+    /// Takes ownership of `item_id`.
+    ///
+    /// # Safety
+    /// `item_id` must be null or an id list allocated with the COM task allocator (as
+    /// SHParseDisplayName returns it) that nothing else frees.
+    pub unsafe fn from_raw(item_id: *mut ITEMIDLIST) -> Self {
+        ItemIdList(item_id)
+    }
+
+    pub fn as_ptr(&self) -> *mut ITEMIDLIST {
+        self.0
+    }
+}
 impl Drop for ItemIdList {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            // SAFETY: allocated by SHParseDisplayName, which documents CoTaskMemFree.
+            // SAFETY: `from_raw` requires a COM task allocation that only this owner frees.
             unsafe { CoTaskMemFree(Some(self.0 as *const c_void)) };
         }
     }
 }
 
 /// The absolute item ids of the paths that still exist, in order, with the paths that were skipped.
+///
+/// Create and use it on the window thread, inside its COM apartment. It is not `Send`.
 pub struct ParsedPaths {
     item_ids: Vec<ItemIdList>,
     pub skipped: Vec<String>,
 }
 
-/// Parses `paths` into absolute item ids. A path the shell does not know (for example one that
-/// was deleted since the search) is skipped and reported. Fails when none are left, or when there
-/// are more than `MAX_ITEMS`.
+/// A shell object together with the item ids it was made from.
+///
+/// Whether the shell copies the item ids it is given is not verified for every route, so the ids
+/// live exactly as long as the object. Fields drop in order, so the object is released before the
+/// ids are freed. Create and use it on the window thread, inside its COM apartment, and never move
+/// it to another thread (it is not `Send`).
+pub struct ShellObject<T> {
+    object: T,
+    items: ParsedPaths,
+}
+impl<T> ShellObject<T> {
+    /// The shell object. A clone of it must not outlive this wrapper.
+    pub fn object(&self) -> &T {
+        &self.object
+    }
+
+    /// The requested paths that the shell did not know, so the object leaves them out.
+    pub fn skipped(&self) -> &[String] {
+        &self.items.skipped
+    }
+}
+
+/// The key two spellings of one path share: separators unified and case folded.
+fn duplicate_key(path: &str) -> String {
+    path.replace('/', "\\").to_lowercase()
+}
+
+/// Parses `paths` into absolute item ids. A repeated path (ignoring case and the separator style)
+/// is kept once, at its first position. A path the shell does not know (for example one that was
+/// deleted since the search) is skipped and reported. Fails when no paths are given, when none
+/// are left, or when there are more than `MAX_ITEMS`.
+///
+/// Call it on the window thread, inside its COM apartment.
 pub fn parse_paths(paths: &[String]) -> Result<ParsedPaths, String> {
-    if paths.len() > MAX_ITEMS {
+    if paths.is_empty() {
+        return Err("No items were given.".to_string());
+    }
+    let mut seen = HashSet::with_capacity(paths.len());
+    let unique: Vec<&String> = paths
+        .iter()
+        .filter(|path| seen.insert(duplicate_key(path)))
+        .collect();
+    if unique.len() > MAX_ITEMS {
         return Err(format!(
             "{} items is too many at once. The limit is {MAX_ITEMS}.",
-            paths.len()
+            unique.len()
         ));
     }
-    let mut item_ids = Vec::with_capacity(paths.len());
+    let mut item_ids = Vec::with_capacity(unique.len());
     let mut skipped = Vec::new();
-    for path in paths {
+    for path in unique {
         let wide_path = wide(path);
         let mut item_id = std::ptr::null_mut();
         // SAFETY: `wide_path` is NUL-terminated and outlives the call, and `item_id` is a valid
-        // out pointer. Ownership of the returned id list passes to `ItemIdList`.
+        // out pointer. SHParseDisplayName allocates the id list with the COM task allocator and
+        // hands it to us, as `from_raw` requires.
         let parsed =
             unsafe { SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut item_id, 0, None) };
         match parsed {
-            Ok(()) => item_ids.push(ItemIdList(item_id)),
+            // SAFETY: see above.
+            Ok(()) => item_ids.push(unsafe { ItemIdList::from_raw(item_id) }),
             Err(_) => skipped.push(path.clone()),
         }
     }
@@ -82,20 +142,22 @@ pub fn parse_paths(paths: &[String]) -> Result<ParsedPaths, String> {
 
 impl ParsedPaths {
     /// The shell's item array for all the items.
-    pub fn shell_item_array(&self) -> Result<IShellItemArray, String> {
-        let item_ids = self.item_id_pointers();
-        // SAFETY: every pointer is a valid absolute id list owned by `self`, alive for the call.
-        // The array keeps its own copies.
-        unsafe { SHCreateShellItemArrayFromIDLists(&item_ids) }
-            .map_err(|error| format!("The shell could not group the items: {error}"))
+    ///
+    /// Call it on the window thread, inside its COM apartment.
+    pub fn shell_item_array(self) -> Result<ShellObject<IShellItemArray>, String> {
+        let array = self.create_item_array()?;
+        Ok(self.wrap(array))
     }
 
     /// A shell data object (CF_HDROP and the shell formats) for all the items, even across folders.
-    pub fn data_object(&self) -> Result<IDataObject, String> {
-        let array = self.shell_item_array()?;
+    ///
+    /// Call it on the window thread, inside its COM apartment.
+    pub fn data_object(self) -> Result<ShellObject<IDataObject>, String> {
+        let array = self.create_item_array()?;
         // SAFETY: a plain COM call on a valid interface, with no bind context.
-        unsafe { array.BindToHandler(None, &BHID_DataObject) }
-            .map_err(|error| format!("The shell could not package the items: {error}"))
+        let data = unsafe { array.BindToHandler(None, &BHID_DataObject) }
+            .map_err(|error| format!("The shell could not package the items: {error}"))?;
+        Ok(self.wrap(data))
     }
 
     /// The shell's context menu object for all the items.
@@ -103,19 +165,37 @@ impl ParsedPaths {
     /// The item array gives the full menu when the items share a folder, but fails with E_FAIL
     /// when they do not. Then the default menu is built on the desktop folder, which accepts
     /// absolute item ids from anywhere (see `menu_across_folders`).
-    pub fn context_menu(&self) -> Result<IContextMenu, String> {
-        let array = self.shell_item_array()?;
+    ///
+    /// Call it on the window thread, inside its COM apartment.
+    pub fn context_menu(self) -> Result<ShellObject<IContextMenu>, String> {
+        let array = self.create_item_array()?;
         // SAFETY: a plain COM call on a valid interface, with no bind context.
         let from_array: windows::core::Result<IContextMenu> =
             unsafe { array.BindToHandler(None, &BHID_SFUIObject) };
-        match from_array {
-            Ok(menu) => Ok(menu),
+        let menu = match from_array {
+            Ok(menu) => menu,
             Err(array_error) => self.menu_across_folders().map_err(|fallback_error| {
                 format!(
                     "The shell has no menu for these items: {array_error}, then {fallback_error}"
                 )
-            }),
+            })?,
+        };
+        Ok(self.wrap(menu))
+    }
+
+    fn wrap<T>(self, object: T) -> ShellObject<T> {
+        ShellObject {
+            object,
+            items: self,
         }
+    }
+
+    fn create_item_array(&self) -> Result<IShellItemArray, String> {
+        let item_ids = self.item_id_pointers();
+        // SAFETY: every pointer is a valid absolute id list owned by `self` and alive for the
+        // call. The caller keeps `self` alive as long as the array (see `ShellObject`).
+        unsafe { SHCreateShellItemArrayFromIDLists(&item_ids) }
+            .map_err(|error| format!("The shell could not group the items: {error}"))
     }
 
     /// The default menu on the desktop folder for items in different folders. On its own it only
@@ -125,9 +205,11 @@ impl ParsedPaths {
     fn menu_across_folders(&self) -> Result<IContextMenu, String> {
         let item_ids = self.item_id_pointers();
         let associations = self.first_item_associations();
-        // SAFETY: the item ids are owned by `self` and alive for the call, and the menu keeps its
-        // own copies. The shell only reads `apidl`, so handing it a pointer from a shared slice is
-        // sound. The two interfaces moved into the definition are released right after the call.
+        // SAFETY: the item ids are valid absolute id lists owned by `self`. Whether the menu
+        // copies them is not verified, so the caller keeps `self` alive as long as the menu (see
+        // `ShellObject`). The pointer array itself is only needed during the call, and the shell
+        // only reads it, so a pointer from a shared slice is sound. The two interfaces moved into
+        // the definition are released right after the call.
         unsafe {
             let desktop = SHGetDesktopFolder()
                 .map_err(|error| format!("the desktop folder is unavailable ({error})"))?;
@@ -157,7 +239,7 @@ impl ParsedPaths {
         // SAFETY: `first` is a valid absolute id list owned by `self`. `child` points inside it
         // and is only used while `first` is alive.
         unsafe {
-            let parent: IShellFolder = SHBindToParent(first.0, Some(&mut child)).ok()?;
+            let parent: IShellFolder = SHBindToParent(first.as_ptr(), Some(&mut child)).ok()?;
             let associations: IQueryAssociations = parent
                 .GetUIObjectOf(HWND::default(), &[child as *const ITEMIDLIST], None)
                 .ok()?;
@@ -168,7 +250,7 @@ impl ParsedPaths {
     fn item_id_pointers(&self) -> Vec<*const ITEMIDLIST> {
         self.item_ids
             .iter()
-            .map(|item_id| item_id.0 as *const ITEMIDLIST)
+            .map(|item_id| item_id.as_ptr() as *const ITEMIDLIST)
             .collect()
     }
 }
@@ -190,10 +272,14 @@ mod tests {
     use windows::Win32::UI::Shell::{CFSTR_SHELLIDLIST, CMF_NORMAL, DROPFILES};
     use windows::Win32::UI::WindowsAndMessaging::{CreatePopupMenu, DestroyMenu, GetMenuItemCount};
 
-    /// Held by every test while it has an apartment. Menus load third-party shell extensions into
-    /// the process, and at least one installed here (Beyond Compare's BCShellEx64.dll) crashes
-    /// the process with an access violation when menus are built in several apartments at once,
-    /// as parallel test threads would. The app builds its menus on its one window thread.
+    /// Held by every test while it has an apartment, so the tests take turns.
+    ///
+    /// Verified on the development machine: without this, running the context menu tests in
+    /// parallel (each in its own apartment, with no freed item ids anywhere) crashed the test
+    /// process in 10 of 15 runs, and every crash in the event log was in Beyond Compare's
+    /// BCShellEx64.dll (a shell extension the menu loads) or its Delphi exception 0x0eedfade.
+    /// With it, 0 of 15. Not verified: why the extension fails, and whether other extensions
+    /// would. The app builds its menus on its one window thread, so it never does this.
     static ONE_APARTMENT_AT_A_TIME: Mutex<()> = Mutex::new(());
 
     /// COM in a single-threaded apartment for the test thread, left again when dropped. Declare it
@@ -286,6 +372,20 @@ mod tests {
         }
     }
 
+    /// Fills a popup menu that is never shown from `menu`, and returns how many entries it got.
+    fn filled_entry_count(menu: &IContextMenu) -> i32 {
+        // SAFETY: the popup menu is never shown and is destroyed before returning.
+        // QueryContextMenu only adds entries to it.
+        unsafe {
+            let popup = CreatePopupMenu().expect("CreatePopupMenu");
+            let filled: HRESULT = menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL);
+            let entries = GetMenuItemCount(Some(popup));
+            let _ = DestroyMenu(popup);
+            assert!(filled.is_ok(), "QueryContextMenu failed: {filled:?}");
+            entries
+        }
+    }
+
     #[test]
     fn parse_paths_skips_a_missing_path_and_reports_it() {
         let _com = ComApartment::enter();
@@ -296,8 +396,10 @@ mod tests {
         paths.insert(1, missing.clone());
 
         let parsed = parse_paths(&paths).expect("three paths exist");
-        assert_eq!(parsed.skipped, vec![missing]);
+        assert_eq!(parsed.skipped, vec![missing.clone()]);
         assert_eq!(parsed.item_ids.len(), 3);
+        let data = parsed.data_object().unwrap();
+        assert_eq!(data.skipped(), [missing]);
     }
 
     #[test]
@@ -306,8 +408,34 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let missing = root.path().join("gone.txt").to_string_lossy().into_owned();
 
-        assert!(parse_paths(&[missing]).is_err());
-        assert!(parse_paths(&[]).is_err());
+        let error = parse_paths(&[missing]).err().expect("nothing exists");
+        assert!(error.contains("exist"), "unexpected message: {error}");
+    }
+
+    #[test]
+    fn parse_paths_refuses_an_empty_request_with_its_own_message() {
+        let _com = ComApartment::enter();
+        let error = parse_paths(&[]).err().expect("nothing was asked for");
+        assert!(error.contains("No items"), "unexpected message: {error}");
+    }
+
+    #[test]
+    fn parse_paths_drops_repeated_paths_keeping_the_first_order() {
+        let _com = ComApartment::enter();
+        let root = tempfile::tempdir().unwrap();
+        let paths = files_in_three_folders(root.path());
+        let first_again = paths[0].to_uppercase().replace('\\', "/");
+        let requested = vec![
+            paths[0].clone(),
+            paths[1].clone(),
+            first_again,
+            paths[1].clone(),
+        ];
+
+        let parsed = parse_paths(&requested).unwrap();
+        assert!(parsed.skipped.is_empty(), "{:?}", parsed.skipped);
+        let data = parsed.data_object().unwrap();
+        assert_same_paths(&dropped_file_list(data.object()), &paths[..2]);
     }
 
     #[test]
@@ -349,10 +477,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = files_in_three_folders(root.path());
 
-        let parsed = parse_paths(&paths).unwrap();
-        let array = parsed.shell_item_array().expect("an item array");
+        let array = parse_paths(&paths).unwrap().shell_item_array().unwrap();
         // SAFETY: a plain COM call on a valid interface.
-        let count = unsafe { array.GetCount() }.expect("GetCount");
+        let count = unsafe { array.object().GetCount() }.expect("GetCount");
         assert_eq!(count, 3);
     }
 
@@ -362,9 +489,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = files_in_three_folders(root.path());
 
-        let parsed = parse_paths(&paths).unwrap();
-        let data = parsed.data_object().expect("a data object");
-
+        let data = parse_paths(&paths).unwrap().data_object().unwrap();
+        let data = data.object();
         // SAFETY: plain COM calls on a valid interface with formats that live across the calls.
         unsafe {
             let drop_format = hglobal_format(CF_HDROP.0);
@@ -376,31 +502,7 @@ mod tests {
                 "Shell IDList Array"
             );
         }
-        assert_same_paths(&dropped_file_list(&data), &paths);
-    }
-
-    #[test]
-    fn the_data_object_outlives_the_parsed_paths() {
-        let _com = ComApartment::enter();
-        let root = tempfile::tempdir().unwrap();
-        let paths = files_in_three_folders(root.path());
-
-        let data = parse_paths(&paths).unwrap().data_object().unwrap();
-        assert_same_paths(&dropped_file_list(&data), &paths);
-    }
-
-    /// Fills a popup menu that is never shown from `menu`, and returns how many entries it got.
-    fn filled_entry_count(menu: &IContextMenu) -> i32 {
-        // SAFETY: the popup menu is never shown and is destroyed before returning.
-        // QueryContextMenu only adds entries to it.
-        unsafe {
-            let popup = CreatePopupMenu().expect("CreatePopupMenu");
-            let filled: HRESULT = menu.QueryContextMenu(popup, 0, 1, 0x7FFF, CMF_NORMAL);
-            let entries = GetMenuItemCount(Some(popup));
-            let _ = DestroyMenu(popup);
-            assert!(filled.is_ok(), "QueryContextMenu failed: {filled:?}");
-            entries
-        }
+        assert_same_paths(&dropped_file_list(data), &paths);
     }
 
     #[test]
@@ -416,9 +518,11 @@ mod tests {
             })
             .collect();
 
-        let parsed = parse_paths(&paths).unwrap();
-        let menu = parsed.context_menu().expect("a context menu object");
-        assert!(filled_entry_count(&menu) > 0, "the menu has no entries");
+        let menu = parse_paths(&paths).unwrap().context_menu().unwrap();
+        assert!(
+            filled_entry_count(menu.object()) > 0,
+            "the menu has no entries"
+        );
     }
 
     #[test]
@@ -427,18 +531,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = files_in_three_folders(root.path());
 
-        let parsed = parse_paths(&paths).unwrap();
-        let menu = parsed.context_menu().expect("a context menu object");
-        assert!(filled_entry_count(&menu) > 0, "the menu has no entries");
-    }
-
-    #[test]
-    fn the_context_menu_outlives_the_parsed_paths() {
-        let _com = ComApartment::enter();
-        let root = tempfile::tempdir().unwrap();
-        let paths = files_in_three_folders(root.path());
-
         let menu = parse_paths(&paths).unwrap().context_menu().unwrap();
-        assert!(filled_entry_count(&menu) > 0, "the menu has no entries");
+        assert!(
+            filled_entry_count(menu.object()) > 0,
+            "the menu has no entries"
+        );
     }
 }

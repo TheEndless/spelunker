@@ -114,10 +114,10 @@ pub fn show(
         let mut absolute = std::ptr::null_mut();
         SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut absolute, 0, None)
             .map_err(|error| failed("The shell does not know this path", error))?;
-        let absolute = ItemIdList(absolute);
+        let absolute = ItemIdList::from_raw(absolute);
 
         let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
-        let folder: IShellFolder = SHBindToParent(absolute.0, Some(&mut child))
+        let folder: IShellFolder = SHBindToParent(absolute.as_ptr(), Some(&mut child))
             .map_err(|error| failed("Could not find the containing folder", error))?;
         let menu: IContextMenu = folder
             .GetUIObjectOf(window, &[child as *const ITEMIDLIST], None)
