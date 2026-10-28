@@ -1,8 +1,8 @@
 //! Shell objects for many files or folders at once, which may live in different folders.
 //!
 //! The system menu and the native drag both start from a list of paths. This module turns the
-//! paths into absolute shell item ids, then into the shell's own multi-item objects: an item
-//! array, a data object (CF_HDROP and the shell formats), and a context menu object.
+//! paths into absolute shell item ids, then, through the shell's item array, into its own
+//! multi-item objects: a data object (CF_HDROP and the shell formats) and a context menu object.
 //!
 //! Threading: everything here is created and used on the window thread, inside the COM (OLE)
 //! apartment that thread already has. The types are not `Send` (they hold raw item id pointers and
@@ -134,18 +134,6 @@ pub fn parse_paths(paths: &[String]) -> Result<ParsedPaths, String> {
 }
 
 impl ParsedPaths {
-    /// The shell's item array for all the items.
-    ///
-    /// Call it on the window thread, inside its COM apartment.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "only the tests read the array on its own so far")
-    )]
-    pub fn shell_item_array(self) -> Result<ShellObject<IShellItemArray>, String> {
-        let array = self.create_item_array()?;
-        Ok(self.wrap(array))
-    }
-
     /// A shell data object (CF_HDROP and the shell formats) for all the items, even across folders.
     ///
     /// Call it on the window thread, inside its COM apartment.
@@ -467,18 +455,6 @@ mod tests {
         let parsed = parse_paths(&paths).expect("one path exists");
         assert_eq!(parsed.item_ids.len(), 1);
         assert_eq!(parsed.skipped.len(), MAX_ITEMS - 1);
-    }
-
-    #[test]
-    fn the_item_array_holds_files_from_different_folders() {
-        let _com = ComApartment::enter();
-        let root = tempfile::tempdir().unwrap();
-        let paths = files_in_three_folders(root.path());
-
-        let array = parse_paths(&paths).unwrap().shell_item_array().unwrap();
-        // SAFETY: a plain COM call on a valid interface.
-        let count = unsafe { array.object().GetCount() }.expect("GetCount");
-        assert_eq!(count, 3);
     }
 
     #[test]

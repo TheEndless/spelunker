@@ -119,21 +119,29 @@ pub fn reveal_path(path: String) -> Result<(), String> {
 
 /// The given paths that still exist, in the order given, for dropping the rows whose files the
 /// system menu deleted or renamed. One call covers any number of rows. It touches the disk, which
-/// can stall on an offline share, so it runs off the window's thread. Should the check itself
-/// fail, every path is taken to exist, so no row is dropped by mistake.
+/// can stall on an offline share, so it runs off the window's thread. A path is only reported gone
+/// when the system says so. When it cannot tell (no access, a network error) or the check itself
+/// fails, the path counts as existing, so no row is dropped by mistake.
 #[tauri::command]
 pub async fn existing_paths(paths: Vec<String>) -> Vec<String> {
-    let requested = paths.clone();
-    tauri::async_runtime::spawn_blocking(move || paths_that_exist(paths))
+    let requested: std::sync::Arc<[String]> = paths.into();
+    let checked = std::sync::Arc::clone(&requested);
+    tauri::async_runtime::spawn_blocking(move || paths_that_exist(&checked))
         .await
-        .unwrap_or(requested)
+        .unwrap_or_else(|_| requested.to_vec())
 }
 
-fn paths_that_exist(paths: Vec<String>) -> Vec<String> {
+fn paths_that_exist(paths: &[String]) -> Vec<String> {
     paths
-        .into_iter()
-        .filter(|path| std::path::Path::new(path).exists())
+        .iter()
+        .filter(|path| still_exists(std::path::Path::new(path).try_exists()))
+        .cloned()
         .collect()
+}
+
+/// Only a definite "not there" counts as gone. An error means the answer is unknown.
+fn still_exists(lookup: std::io::Result<bool>) -> bool {
+    !matches!(lookup, Ok(false))
 }
 
 /// The regex engine's complaint about a content query, or `None` when it is valid. Used for live
@@ -359,7 +367,7 @@ mod tests {
 
         let requested = vec![path_text(&folder), path_text(&missing), path_text(&file)];
         assert_eq!(
-            paths_that_exist(requested),
+            paths_that_exist(&requested),
             vec![path_text(&folder), path_text(&file)]
         );
     }
@@ -371,12 +379,33 @@ mod tests {
             path_text(&root.path().join("one.txt")),
             path_text(&root.path().join("two.txt")),
         ];
-        assert!(paths_that_exist(requested).is_empty());
+        assert!(paths_that_exist(&requested).is_empty());
     }
 
     #[test]
     fn paths_that_exist_of_nothing_is_nothing() {
-        assert!(paths_that_exist(Vec::new()).is_empty());
+        assert!(paths_that_exist(&[]).is_empty());
+    }
+
+    #[test]
+    fn only_a_definite_not_found_counts_as_gone() {
+        assert!(still_exists(Ok(true)));
+        assert!(!still_exists(Ok(false)));
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(still_exists(Err(denied)), "no access is not gone");
+        let network = std::io::Error::other("the network name is no longer available");
+        assert!(still_exists(Err(network)), "a network error is not gone");
+    }
+
+    /// A path the system refuses to look up gives an error, not "not found", so it is kept.
+    #[test]
+    fn paths_that_exist_keeps_a_path_the_system_cannot_check() {
+        let unchecked = "C:\\folder\0name.txt".to_string();
+        assert!(std::path::Path::new(&unchecked).try_exists().is_err());
+        assert_eq!(
+            paths_that_exist(std::slice::from_ref(&unchecked)),
+            vec![unchecked]
+        );
     }
 
     #[test]
@@ -388,7 +417,7 @@ mod tests {
 
         let requested = vec![path_text(&file), path_text(&missing), path_text(&file)];
         assert_eq!(
-            paths_that_exist(requested),
+            paths_that_exist(&requested),
             vec![path_text(&file), path_text(&file)]
         );
     }

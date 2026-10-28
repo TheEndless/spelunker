@@ -59,6 +59,7 @@
   import StoppingDialog from './lib/StoppingDialog.svelte';
   import type { DisplayRow } from './lib/types';
   import { createValidator } from './lib/validation.svelte';
+  import { goneNotice, removeGoneRows, skippedNotice } from './lib/vanishedRows';
 
   const preferences = new Preferences();
   const session = new SearchSession();
@@ -380,12 +381,15 @@
     }
   }
 
-  /** The entries Spelunker adds above Windows' own menu. Several rows share only the copy entries. */
-  function extraActions(rows: DisplayRow[]): { label: string; run: () => void }[] {
+  /**
+   * The entries Spelunker adds above Windows' own menu. Several rows share only the copy entries,
+   * which copy `liveRows()` when chosen, so rows dropped while the menu was open are left out.
+   */
+  function extraActions(rows: DisplayRow[], liveRows: () => DisplayRow[] = () => rows): { label: string; run: () => void }[] {
     if (rows.length > 1) {
       return [
-        { label: 'Copy paths', run: () => void copy(rows.map((row) => row.path).join('\r\n')) },
-        { label: 'Copy names', run: () => void copy(rows.map((row) => row.name).join('\r\n')) },
+        { label: 'Copy paths', run: () => void copy(liveRows().map((row) => row.path).join('\r\n')) },
+        { label: 'Copy names', run: () => void copy(liveRows().map((row) => row.name).join('\r\n')) },
       ];
     }
     const row = rows[0];
@@ -408,26 +412,30 @@
       menu = { rows, x, y };
       return;
     }
-    const actions = extraActions(rows);
+    let liveRows = rows;
+    const actions = extraActions(rows, () => liveRows);
     const paths = rows.map((chosen) => chosen.path);
+    const removeGone = (candidates: string[]) => removeGoneRows(candidates, existingPaths, removeVanishedRows);
     try {
       const result = await showShellMenu(paths, x, y, actions.map((action) => action.label));
-      // Files that were gone before the menu opened were left out of it. Say so, and drop their rows.
+      // The shell left these out of the menu. Some are gone, and others it could not handle (a long
+      // path, an offline share), which keep their rows.
       const skipped = new Set(result.skipped);
       if (skipped.size > 0) {
-        const count = skipped.size.toLocaleString('en-US');
-        say('info', skipped.size === 1 ? `${count} file no longer exists` : `${count} files no longer exist`);
-        removeVanishedRows(result.skipped);
+        const gone = new Set(await removeGone(result.skipped));
+        liveRows = rows.filter((chosen) => !gone.has(chosen.path));
+        const notice = skippedNotice(gone.size, skipped.size - gone.size);
+        if (notice) say('info', notice);
       }
       if (result.extra !== null) actions[result.extra]?.run();
       // A shell command such as Delete or Rename can remove files, so drop the rows whose files are gone.
-      if (result.ranShellCommand) {
-        const shown = paths.filter((path) => !skipped.has(path));
-        const remaining = new Set(await existingPaths(shown));
-        removeVanishedRows(shown.filter((path) => !remaining.has(path)));
-      }
+      if (result.ranShellCommand) await removeGone(paths.filter((path) => !skipped.has(path)));
     } catch (error) {
-      say('error', String(error));
+      // The menu fails when none of the files exist, and the command can fail part way. Either way the
+      // rows of files that are gone would repeat the error on every later right-click, so drop them.
+      const gone = await removeGone(paths);
+      if (gone.length === paths.length) say('info', goneNotice(gone.length));
+      else say('error', String(error));
     }
     // The system menu takes focus with it. Put it back where the menu came from so the keyboard keeps
     // working. The map may have gone meanwhile (its last file removed), and then the results take it.
