@@ -85,9 +85,26 @@ impl<T> ShellObject<T> {
     }
 }
 
-/// The key two spellings of one path share: separators unified and case folded.
+const LONG_PATH_PREFIX: &str = r"\\?\";
+const LONG_UNC_PREFIX: &str = r"\\?\unc\";
+
+/// The key two spellings of one path share: separators unified, case folded, the long-path prefix
+/// dropped, and a trailing separator trimmed. `pathKey` in src/lib/fileDrag.ts does the same, and
+/// both are tested with the same cases.
 fn duplicate_key(path: &str) -> String {
-    path.replace('/', "\\").to_lowercase()
+    let unified = path.replace('/', "\\").to_lowercase();
+    let without_prefix =
+        if unified.starts_with(LONG_PATH_PREFIX) && !unified.starts_with(LONG_UNC_PREFIX) {
+            &unified[LONG_PATH_PREFIX.len()..]
+        } else {
+            unified.as_str()
+        };
+    // A drive root keeps its separator (`c:\`), since `c:` is the current folder of that drive.
+    if without_prefix.len() > 3 {
+        without_prefix.trim_end_matches('\\').to_string()
+    } else {
+        without_prefix.to_string()
+    }
 }
 
 /// Parses `paths` into absolute item ids. A repeated path (ignoring case and the separator style)
@@ -256,6 +273,22 @@ mod tests {
     use windows::Win32::System::Ole::{ReleaseStgMedium, CF_HDROP};
     use windows::Win32::UI::Shell::{CFSTR_SHELLIDLIST, CMF_NORMAL, DROPFILES};
     use windows::Win32::UI::WindowsAndMessaging::{CreatePopupMenu, DestroyMenu, GetMenuItemCount};
+
+    /// The same cases as `pathKey` in src/lib/fileDrag.test.ts.
+    #[test]
+    fn duplicate_key_matches_the_pages_path_key() {
+        let cases = [
+            ("C:/Data/One.TXT", r"c:\data\one.txt"),
+            (r"\\?\C:\Data\One.txt", r"c:\data\one.txt"),
+            (r"C:\Data\Folder\", r"c:\data\folder"),
+            (r"C:\", r"c:\"),
+            (r"\\?\UNC\server\share\a.txt", r"\\?\unc\server\share\a.txt"),
+            (r"\\server\share\a.txt", r"\\server\share\a.txt"),
+        ];
+        for (path, key) in cases {
+            assert_eq!(duplicate_key(path), key, "{path}");
+        }
+    }
 
     /// Held by every test while it has an apartment, so the tests take turns.
     ///

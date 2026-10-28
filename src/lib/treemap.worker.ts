@@ -141,14 +141,13 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
 }
 
 function nameOfRect(layout: Layout, rect: number): string {
-  const file = tree.folderById(layout.folderId[rect])?.files.find((candidate) => candidate.id === layout.id[rect]);
-  return file?.name ?? '';
+  return tree.fileById(layout.id[rect])?.name ?? '';
 }
 
 function locate(requestId: number, fileId: number, send: Send) {
   const answer = (rect: number, zoomFolderId: number | null) => send({ type: 'located', requestId, rect, zoomFolderId });
   const folder = tree.folderOfFile(fileId);
-  const file = folder?.files.find((candidate) => candidate.id === fileId);
+  const file = tree.fileById(fileId);
   // A removed file, or one with no weight under the metric last laid out, is not drawn anywhere.
   if (!folder || !file || (lastMetric === 'size' ? file.size : file.hits) <= 0) return answer(-1, null);
   const direct = lastFileRects.get(fileId);

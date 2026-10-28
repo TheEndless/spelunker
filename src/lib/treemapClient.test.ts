@@ -348,6 +348,16 @@ describe('TreemapClient', () => {
     await expect(pending).resolves.toEqual({ rect: 3, zoomFolderId: null });
   });
 
+  it('answers waiting locate and describe questions with nothing when disposed', async () => {
+    const { client, canvas } = setup();
+    client.attach(canvas);
+    const located = client.locate(7);
+    const described = client.describeFolder(2);
+    client.dispose();
+    await expect(located).resolves.toEqual({ rect: -1, zoomFolderId: null });
+    await expect(described).resolves.toBe('');
+  });
+
   it('stops requesting layouts after detach', () => {
     const { client, posted, canvas, emit } = setup();
     client.setView(view());

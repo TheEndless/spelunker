@@ -387,6 +387,17 @@ mod tests {
     }
 
     #[test]
+    fn paths_that_exist_returns_each_path_exactly_as_it_was_given() {
+        // The page matches the answer to its own paths by text, so a spelling must never be rewritten.
+        let root = tempfile::tempdir().unwrap();
+        let file = root.path().join("Here.TXT");
+        std::fs::write(&file, b"here").unwrap();
+        let odd_spelling = path_text(&file).replace('\\', "/").to_uppercase();
+        let found = paths_that_exist(std::slice::from_ref(&odd_spelling));
+        assert_eq!(found, vec![odd_spelling]);
+    }
+
+    #[test]
     fn paths_that_exist_drops_every_missing_path() {
         let root = tempfile::tempdir().unwrap();
         let requested = vec![

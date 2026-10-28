@@ -25,6 +25,17 @@ describe('FolderTree', () => {
     expect(src.name).toBe('Src'); // first-seen casing is kept for display
   });
 
+  it('finds a file by id until it is removed or the tree is cleared', () => {
+    const tree = new FolderTree();
+    tree.add(record(1, 'C:\a', 'One.txt'));
+    tree.add(record(2, 'C:\a', 'Two.txt'));
+    expect(tree.fileById(2)?.name).toBe('Two.txt');
+    tree.remove(2);
+    expect(tree.fileById(2)).toBeUndefined();
+    tree.clear();
+    expect(tree.fileById(1)).toBeUndefined();
+  });
+
   it('keeps two files that differ only in case as separate leaves', () => {
     const tree = new FolderTree();
     tree.add(record(1, 'C:\\a', 'File.txt'));

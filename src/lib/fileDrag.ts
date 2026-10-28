@@ -25,9 +25,19 @@ export interface DragGesture {
   cancel(): void;
 }
 
-/** The key two spellings of one Windows path share: separators unified and case folded. */
-function pathKey(path: string): string {
-  return path.replace(/\//g, '\\').toLowerCase();
+const LONG_PATH_PREFIX = '\\\\?\\';
+const LONG_UNC_PREFIX = '\\\\?\\unc\\';
+
+/**
+ * The key two spellings of one Windows path share: separators unified, case folded, the long-path
+ * prefix dropped, and a trailing separator trimmed. `duplicate_key` in shell_items.rs does the
+ * same, and both are tested with the same cases.
+ */
+export function pathKey(path: string): string {
+  const unified = path.replace(/\//g, '\\').toLowerCase();
+  const withoutPrefix = unified.startsWith(LONG_PATH_PREFIX) && !unified.startsWith(LONG_UNC_PREFIX) ? unified.slice(LONG_PATH_PREFIX.length) : unified;
+  // A drive root keeps its separator ("c:\"), since "c:" is the current folder of that drive.
+  return withoutPrefix.length > 3 ? withoutPrefix.replace(/\\+$/, '') : withoutPrefix;
 }
 
 /**

@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { createDragGesture, createSelfDropFilter, OutgoingPaths, type FolderDropEvent } from './fileDrag';
+import { createDragGesture, createSelfDropFilter, OutgoingPaths, pathKey, type FolderDropEvent } from './fileDrag';
+
+describe('pathKey', () => {
+  // The same cases as `duplicate_key_matches_the_pages_path_key` in src-tauri/src/shell_items.rs.
+  it.each([
+    ['C:/Data/One.TXT', 'c:\\data\\one.txt'],
+    ['\\\\?\\C:\\Data\\One.txt', 'c:\\data\\one.txt'],
+    ['C:\\Data\\Folder\\', 'c:\\data\\folder'],
+    ['C:\\', 'c:\\'],
+    ['\\\\?\\UNC\\server\\share\\a.txt', '\\\\?\\unc\\server\\share\\a.txt'],
+    ['\\\\server\\share\\a.txt', '\\\\server\\share\\a.txt'],
+  ])('turns %s into %s', (path, key) => {
+    expect(pathKey(path)).toBe(key);
+  });
+});
 
 describe('OutgoingPaths', () => {
   const outgoing = ['C:\\Data\\One.txt', 'D:\\other\\two.log'];

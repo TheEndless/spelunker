@@ -167,6 +167,9 @@ export class TreemapClient {
   dispose(): void {
     this.detach();
     this.unsubscribe();
+    // The worker will never answer, so waiting callers get the "nowhere" answer instead of hanging.
+    for (const [requestId, resolve] of this.waiting) resolve({ type: 'located', requestId, rect: -1, zoomFolderId: null });
+    this.waiting.clear();
     this.worker?.terminate();
     this.worker = null;
   }

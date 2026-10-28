@@ -39,6 +39,7 @@ export class FolderTree {
   readonly root: FolderNode;
   private nextFolderId = 0;
   private readonly folderOfFileId = new Map<number, FolderNode>();
+  private readonly filesById = new Map<number, TreeFile>();
   private readonly foldersById = new Map<number, FolderNode>();
 
   constructor() {
@@ -65,15 +66,17 @@ export class FolderTree {
       }
       node = child;
     }
-    node.files.push({
+    const file: TreeFile = {
       id: record.id,
       name: record.name,
       size: record.size,
       hits: record.hits,
       modifiedMs: record.modifiedMs,
       category: fileCategoryIndex(record.name),
-    });
+    };
+    node.files.push(file);
     this.folderOfFileId.set(record.id, node);
+    this.filesById.set(record.id, file);
   }
 
   /** Removes a file and any folders it leaves empty. Returns false when the id is unknown. */
@@ -81,6 +84,7 @@ export class FolderTree {
     const folder = this.folderOfFileId.get(id);
     if (!folder) return false;
     this.folderOfFileId.delete(id);
+    this.filesById.delete(id);
     folder.files.splice(folder.files.findIndex((file) => file.id === id), 1);
     let node = folder;
     while (node.parent && node.files.length === 0 && node.folders.size === 0) {
@@ -95,12 +99,17 @@ export class FolderTree {
     this.root.folders.clear();
     this.root.files = [];
     this.folderOfFileId.clear();
+    this.filesById.clear();
     this.foldersById.clear();
     this.foldersById.set(this.root.id, this.root);
   }
 
   folderOfFile(id: number): FolderNode | undefined {
     return this.folderOfFileId.get(id);
+  }
+
+  fileById(id: number): TreeFile | undefined {
+    return this.filesById.get(id);
   }
 
   folderById(id: number): FolderNode | undefined {

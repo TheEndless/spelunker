@@ -465,6 +465,12 @@
   const fileDrag = createDragGesture({ threshold: DRAG_THRESHOLD });
   /** Stops following the pointer for the last press, while it is still followed. */
   let stopFollowingPress: (() => void) | null = null;
+  let forgetPressTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => () => {
+    clearTimeout(forgetPressTimer);
+    stopFollowingPress?.();
+  });
 
   /**
    * Selects at once what a press selects (an unselected row, a Shift range), and watches for a drag.
@@ -517,7 +523,7 @@
         if (stopFollowingPress === stop) stopFollowingPress = null;
         if (endEvent?.type === 'pointerup') {
           fileDrag.release();
-          setTimeout(forget);
+          forgetPressTimer = setTimeout(forget);
         } else {
           fileDrag.cancel();
           forget();
