@@ -15,6 +15,8 @@
     elapsedMs: number;
     errors: ErrorRow[];
     summary: Summary | null;
+    /** The selection when it is more than one row, for example "3 selected, 12.4 MB". Empty hides it. */
+    selection?: string;
     /** The user wants the results map, which shows the Map button as pressed. */
     mapOn?: boolean;
     /** The window is too short for the map, so it is collapsed and the button cannot bring it back yet. */
@@ -31,6 +33,7 @@
     elapsedMs,
     errors,
     summary,
+    selection = '',
     mapOn = false,
     mapTooShort = false,
     onToggleMap,
@@ -57,6 +60,9 @@
   <span class="state" class:busy={running}>{phase}</span>
   {#if running || summary}
     <span class="find" class:quiet={!summary || matches === 0}>{find}</span>
+  {/if}
+  {#if selection}
+    <span class="selection">{selection}</span>
   {/if}
   <span class="mechanics">
     <span>{filesScanned.toLocaleString()} files scanned</span>
@@ -132,6 +138,9 @@
   .find.quiet {
     font-weight: 400;
     color: var(--text-muted);
+  }
+  .selection {
+    color: var(--text);
   }
   .mechanics {
     display: flex;

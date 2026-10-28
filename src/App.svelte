@@ -50,10 +50,12 @@
     type Modifiers,
     type SelectionState,
   } from './lib/selection';
+  import { selectionSummary } from './lib/selectionSummary';
   import SettingsDialog from './lib/SettingsDialog.svelte';
   import { withShortcut } from './lib/shortcuts';
   import Splitter from './lib/Splitter.svelte';
   import StatusBar from './lib/StatusBar.svelte';
+  import { count } from './lib/statusSummary';
   import StoppingDialog from './lib/StoppingDialog.svelte';
   import type { DisplayRow } from './lib/types';
   import { createValidator } from './lib/validation.svelte';
@@ -151,8 +153,40 @@
     return selectedRowHint >= 0 ? rows[selectedRowHint] : null;
   });
 
+  /** "3 selected, 12.4 MB" once more than one row is selected. One pass over the rows per selection or rows change. */
+  const selectionText = $derived.by(() => {
+    if (selection.paths.size < 2) return '';
+    let selectedCount = 0;
+    let totalBytes = 0;
+    for (const row of session.rows) {
+      if (!selection.paths.has(row.path)) continue;
+      selectedCount++;
+      totalBytes += row.size;
+    }
+    return selectionSummary(selectedCount, totalBytes);
+  });
+
+  /**
+   * "N selected" for screen readers after select all, a range, or a keyboard toggle, which moving
+   * the active row does not announce. It waits until the keys settle, so holding Shift+Down says it once.
+   */
+  let selectionAnnouncement = $state('');
+  let selectionAnnouncementTimer: ReturnType<typeof setTimeout> | undefined;
+  const SELECTION_ANNOUNCEMENT_DELAY_MS = 400;
+
+  function announceSelectionSoon() {
+    clearTimeout(selectionAnnouncementTimer);
+    // Emptied first, so the same count said twice in a row is still announced.
+    selectionAnnouncement = '';
+    selectionAnnouncementTimer = setTimeout(
+      () => (selectionAnnouncement = count(selection.paths.size, 'selected', 'selected')),
+      SELECTION_ANNOUNCEMENT_DELAY_MS,
+    );
+  }
+
   function pressResultRow(index: number, modifiers: Modifiers) {
     selection = pressRow(selection, session.sortedRows, index, modifiers);
+    if (modifiers.shift) announceSelectionSoon();
   }
 
   function releaseResultRow(index: number, modifiers: Modifiers, pressedOnSelected: boolean) {
@@ -161,14 +195,17 @@
 
   function moveCurrentRow(targetIndex: number, modifiers: Modifiers) {
     selection = moveCurrent(selection, session.sortedRows, targetIndex, modifiers);
+    if (modifiers.shift) announceSelectionSoon();
   }
 
   function toggleCurrentRow() {
     selection = toggleCurrent(selection);
+    announceSelectionSoon();
   }
 
   function selectAllRows() {
     selection = selectAll(selection, session.sortedRows);
+    announceSelectionSoon();
   }
 
   /** Takes rows whose files are gone out of the results, and out of the selection. */
@@ -558,6 +595,7 @@
     elapsedMs={session.elapsedMs}
     errors={session.errors}
     summary={session.summary}
+    selection={selectionText}
     mapOn={!preferences.mapCollapsed}
     {mapTooShort}
     onToggleMap={toggleMap}
@@ -581,6 +619,9 @@
 {/if}
 
 <div class="sr-only" id="search-announcement" role="status" aria-live="polite">{announcement}</div>
+<!-- Separate from the search's region, which is derived from the search state alone. -->
+<div class="sr-only" id="selection-announcement" role="status" aria-live="polite">{selectionAnnouncement}</div>
+
 <StoppingDialog visible={session.stoppingNoticeVisible} onHide={() => session.hideStoppingNotice()} />
 
 {#if settingsOpen}
