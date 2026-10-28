@@ -4,11 +4,10 @@
 //! so on). A few entries of our own are put above it. Everything here must run on the thread that
 //! owns the window, because the menu is modal and the shell talks to that window's message loop.
 
-use std::ffi::c_void;
+use crate::shell_items::{wide, ItemIdList};
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows::core::{Interface, PCSTR, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     DefSubclassProc, IContextMenu, IContextMenu2, IContextMenu3, IShellFolder,
@@ -73,21 +72,6 @@ unsafe extern "system" fn forward_menu_messages(
         }
     }
     unsafe { DefSubclassProc(window, message, wparam, lparam) }
-}
-
-fn wide(text: &str) -> Vec<u16> {
-    text.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-/// Frees a shell item id list when it goes out of scope.
-struct ItemIdList(*mut ITEMIDLIST);
-impl Drop for ItemIdList {
-    fn drop(&mut self) {
-        if !self.0.is_null() {
-            // SAFETY: allocated by SHParseDisplayName, which documents CoTaskMemFree.
-            unsafe { CoTaskMemFree(Some(self.0 as *const c_void)) };
-        }
-    }
 }
 
 struct Menu(HMENU);

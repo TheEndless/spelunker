@@ -11,6 +11,7 @@ mod os_datetime;
 mod preview_access;
 mod roots;
 mod shell_integration;
+mod shell_items;
 mod shell_menu;
 mod store;
 mod type_name;
