@@ -3,7 +3,6 @@
   import {
     copyText,
     existingPaths,
-    hasShellMenu,
     openInEditor,
     openPath,
     previewFile,
@@ -11,6 +10,7 @@
     saveTextFile,
     showShellMenu,
     startFileDrag,
+    systemMenuCovers,
     takeLaunchFolder,
     validateContent,
     validateNameRegex,
@@ -435,7 +435,8 @@
    */
   async function showRowMenu(row: DisplayRow, x: number, y: number, origin: PaneId = 'results') {
     const rows = menuRowsFor(selection, session.sortedRows, row);
-    if (!hasShellMenu) {
+    // In a plain browser, and for more rows than the system menu takes, the app's own menu opens.
+    if (!systemMenuCovers(rows.length)) {
       menu = { rows, x, y };
       return;
     }

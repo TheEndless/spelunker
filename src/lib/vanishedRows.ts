@@ -5,8 +5,7 @@
  * merely could not handle (a long path, an offline share, no access) keeps its row.
  */
 
-/** The most items one system menu may name. Mirrors `MAX_ITEMS` in `src-tauri/src/shell_items.rs`. */
-export const MAX_SHELL_ITEMS = 5000;
+import { MAX_SHELL_ITEMS } from './backend';
 
 /**
  * Removes the rows of `paths` whose files the backend confirms are gone, and returns those paths.

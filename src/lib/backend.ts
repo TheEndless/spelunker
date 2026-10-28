@@ -292,8 +292,28 @@ export async function startFileDrag(paths: string[]): Promise<DragOutcome> {
   // before anything else so no script can reach the real drag. A release build drops it.
   const hook = import.meta.env.DEV ? window.__spFileDragHook : undefined;
   if (hook) return hook({ paths });
+  if (paths.length > MAX_SHELL_ITEMS) {
+    const count = paths.length.toLocaleString('en-US');
+    const limit = MAX_SHELL_ITEMS.toLocaleString('en-US');
+    return { started: false, effect: 'none', skipped: [], reason: `${count} files is too many to drag at once. The limit is ${limit}.` };
+  }
   if (!insideTauri) return (await mock()).startFileDrag(paths);
   return invoke<DragOutcome>('start_file_drag', { paths });
+}
+
+/**
+ * The most files one drag or system menu may name. It must equal `MAX_ITEMS` in
+ * `src-tauri/src/shell_items.rs` (a test compares them): the backend parses every file, which can
+ * stall on offline shares, so it refuses more.
+ */
+export const MAX_SHELL_ITEMS = 5000;
+
+/**
+ * Whether the system menu is shown for `rowCount` rows. More rows than the backend accepts get the
+ * app's own menu (Copy paths, Copy names) instead of an error.
+ */
+export function systemMenuCovers(rowCount: number): boolean {
+  return hasShellMenu && rowCount <= MAX_SHELL_ITEMS;
 }
 
 /** True when the system menu is available, so the app uses it instead of its own list. */

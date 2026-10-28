@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MAX_SHELL_ITEMS, goneNotice, removeGoneRows, skippedNotice } from './vanishedRows';
+import { MAX_SHELL_ITEMS } from './backend';
+import { goneNotice, removeGoneRows, skippedNotice } from './vanishedRows';
 
 /** A backend existence check over a fixed set of files that are still on disk. */
 function onDisk(...present: string[]) {
