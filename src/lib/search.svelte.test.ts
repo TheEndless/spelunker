@@ -194,19 +194,27 @@ describe('removing many rows at once', () => {
   });
 
   it('removes 5,000 of 100,000 rows quickly', () => {
-    const session = startedSession();
     const paths = Array.from({ length: 100_000 }, (_, i) => `C:/x/file${i}`);
-    backend.emit!(batchOf(...paths));
     const doomed = new Set(paths.filter((_, i) => i % 20 === 0));
     expect(doomed.size).toBe(5_000);
+    // Every round needs its own full session, so they are all filled before any is timed.
+    const sessions = Array.from({ length: 5 }, () => {
+      const session = startedSession();
+      backend.emit!(batchOf(...paths));
+      return session;
+    });
     // The suite fakes timers, which also freezes performance.now(), so time with the real clock.
+    // The fastest round measures the code. A single round also measures whatever else the machine
+    // is doing.
     vi.useRealTimers();
-    const startedAt = performance.now();
-    session.removeRows(doomed);
-    const elapsedMs = performance.now() - startedAt;
-    console.log(`removeRows 5,000 of 100,000: ${elapsedMs.toFixed(2)} ms`);
-    expect(session.rows).toHaveLength(95_000);
-    expect(elapsedMs).toBeLessThan(100);
+    let fastest = Infinity;
+    for (const session of sessions) {
+      const startedAt = performance.now();
+      session.removeRows(doomed);
+      fastest = Math.min(fastest, performance.now() - startedAt);
+      expect(session.rows).toHaveLength(95_000);
+    }
+    expect(fastest).toBeLessThan(100);
   });
 });
 

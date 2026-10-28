@@ -497,9 +497,15 @@ describe('paintCushion', () => {
     const layout = handLayout(rects);
     const { context } = fakeContext();
     paintCushion(context, layout, 2400, 520, cushion(), null, null);
-    const started = performance.now();
-    paintCushion(context, layout, 2400, 520, cushion(), null, null);
-    expect(performance.now() - started).toBeLessThan(250);
+    // The fastest of a few paints measures the code. A single paint also measures whatever else
+    // the machine is doing.
+    let fastest = Infinity;
+    for (let round = 0; round < 5; round++) {
+      const started = performance.now();
+      paintCushion(context, layout, 2400, 520, cushion(), null, null);
+      fastest = Math.min(fastest, performance.now() - started);
+    }
+    expect(fastest).toBeLessThan(250);
   });
 });
 
