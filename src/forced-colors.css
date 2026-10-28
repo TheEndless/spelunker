@@ -17,6 +17,16 @@
     outline-offset: -2px;
   }
 
+  /* The current row: a Highlight edge, and a dashed outline when it is not selected (the solid
+     outline above already marks a selected one). */
+  .row.current {
+    border-left-color: Highlight !important;
+  }
+  .row.current:not(.selected) {
+    outline: 1px dashed Highlight !important;
+    outline-offset: -1px;
+  }
+
   .row[role='row']:hover,
   .item:hover,
   .recall:hover,

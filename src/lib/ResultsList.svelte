@@ -471,7 +471,9 @@
    * No preventDefault here: `user-select: none` on the rows is what keeps text from being selected.
    */
   function onRowPointerDown(event: PointerEvent, row: DisplayRow, index: number) {
-    if (event.button !== 0) return;
+    // Only a mouse presses and drags. A finger or a pen moves a few pixels on the way to a pan, and
+    // must never start a file drag. A tap still selects through the click (a whole press and release).
+    if (event.button !== 0 || event.pointerType !== 'mouse') return;
     // A native drag takes the release, so the page may never have seen the last press end. Whatever
     // is left of it ends here, so nothing from it outlives into this press.
     stopFollowingPress?.();
@@ -934,6 +936,12 @@
   /* The current row has the full edge, also when Ctrl moved it onto an unselected row. */
   .row.current {
     border-left-color: var(--row-selected-edge);
+  }
+  /* While the keyboard drives the grid, the current row is also outlined, so it stays clear when
+     it is not selected (Ctrl with the arrows), where the edge alone is faint in dark. */
+  .scroller:focus-visible .row.current {
+    outline: 1px solid var(--row-selected-edge);
+    outline-offset: -1px;
   }
   .cell {
     padding: 0 10px;

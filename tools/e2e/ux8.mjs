@@ -3,13 +3,19 @@
 // context menu on a selection, Enter, what clears the selection, and dragging files out up to the
 // request for the native drag (which the DEV hook answers, so no drag is ever started).
 //
-// node ux8.mjs
+// node ux8.mjs [--shots <folder>]
+//   With --shots, the current-row cue after Ctrl+Down is saved in light, dark and forced colors.
 //   Runs in headless Edge against the dev server (start it first: npm run dev). Needs no Spelunker
 //   window, takes no focus, and sends nothing to the desktop. Every key and mouse event goes through
 //   the page's own protocol (Input.dispatchKeyEvent and Input.dispatchMouseEvent).
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PAGE_HELPERS } from './cdp.mjs';
 import { drawFrame, launchHeadlessEdge, settleFrames } from './headless.mjs';
 import { createChecker, openPage, sleep } from './page.mjs';
+
+const shotsIndex = process.argv.indexOf('--shots');
+const shotsFolder = shotsIndex > 0 ? process.argv[shotsIndex + 1] : null;
 
 const APP_URL = 'http://localhost:5173/';
 const HEADLESS_PORT = 9372;
@@ -315,6 +321,10 @@ async function browserChecks() {
 
   // ---- dragging files out
   await fileDragChecks();
+  await touchChecks();
+
+  // ---- the current row's cue
+  await currentRowCueChecks();
 
   // ---- Ctrl+A in the Containing text box
   await startFrom(2);
@@ -543,6 +553,90 @@ async function fileDragChecks() {
   check('after those presses a plain click selects normally: row 6 alone', same(await selected(), [6]) && same(await current(), [6]), { selected: await selected(), current: await current() });
 
   await vanishedRowChecks(pathsOf);
+}
+
+/** One finger on the screen, through the page's protocol. An empty list lifts it. */
+const touch = (type, points) => send('Input.dispatchTouchEvent', { type, touchPoints: points });
+
+/** A finger never presses a row for a drag: a swipe asks for none, and a tap still selects. */
+async function touchChecks() {
+  await ev('window.__sp.fileDragCalls.length = 0');
+  await startFrom(2);
+  await clickRow(4, SHIFT);
+  const swipeStart = await ev('window.__ux8.rowPoint(6)');
+  await touch('touchStart', [{ x: swipeStart.x, y: swipeStart.y }]);
+  for (let step = 1; step <= 4; step++) {
+    await touch('touchMove', [{ x: swipeStart.x + 5 * step, y: swipeStart.y }]);
+    await sleep(30);
+  }
+  await touch('touchEnd', []);
+  await sleep(400);
+  check('a finger moved 20 px along a row asks for no drag', (await fileDragCalls()).length === 0, await fileDragCalls());
+
+  const tapPoint = await ev('window.__ux8.rowPoint(8)');
+  await touch('touchStart', [{ x: tapPoint.x, y: tapPoint.y }]);
+  await touch('touchEnd', []);
+  await sleep(400);
+  check('a tap on a row selects exactly that row (row 8)', same(await selected(), [8]) && same(await current(), [8]), { selected: await selected(), current: await current() });
+}
+
+/** The computed outline and left edge of the rendered row at `index`. */
+const rowCue = (index) =>
+  ev(`(() => { const row = document.querySelector('.body .row[aria-rowindex="${index + 2}"]'); const style = getComputedStyle(row); return { outlineStyle: style.outlineStyle, outlineColor: style.outlineColor, borderLeftColor: style.borderLeftColor }; })()`);
+
+/** Saves the top of the results grid into the --shots folder, when one was given. */
+async function gridShot(name) {
+  if (!shotsFolder) return;
+  await frame();
+  const box = await ev(`(() => { const box = document.querySelector('[data-pane="results"] [role=grid]').getBoundingClientRect(); return { x: box.left, y: box.top, width: box.width, height: Math.min(box.height, 320) }; })()`);
+  const reply = await send('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 } });
+  writeFileSync(join(shotsFolder, `${name}.png`), Buffer.from(reply.result.data, 'base64'));
+  console.log(`      saved ${name}.png`);
+}
+
+async function chooseTheme(label) {
+  await ev(`document.querySelector('button[aria-label^="Appearance"]').click()`);
+  await sleep(300);
+  await ev(`[...document.querySelectorAll('.theme .modes button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`);
+  await sleep(200);
+  await key('Escape');
+  await settle(500);
+}
+
+/**
+ * After Ctrl+Down the current row is not selected, so it needs its own cue: an outline while the
+ * grid has keyboard focus, and in forced colors a Highlight edge with a dashed outline (the
+ * colors of the normal cue are replaced there). Row 3 is selected, row 4 is current, row 6 is a
+ * plain row to compare with.
+ */
+async function currentRowCueChecks() {
+  await startFrom(3);
+  await key('ArrowDown', { ctrl: true });
+  await mouse('mouseMoved', 5, 5);
+  await settle(300);
+  const plain = await rowCue(6);
+  const currentRow = await rowCue(4);
+  check('with the grid focused, the current unselected row has an outline a plain row does not', same(await selected(), [3]) && same(await current(), [4]) && currentRow.outlineStyle === 'solid' && plain.outlineStyle === 'none', { selected: await selected(), current: await current(), currentRow, plain });
+  await gridShot('current-row-light');
+  await chooseTheme('Dark');
+  await focusGrid();
+  await key('ArrowDown', { ctrl: true });
+  await key('ArrowUp', { ctrl: true });
+  await mouse('mouseMoved', 5, 5);
+  await gridShot('current-row-dark');
+  await chooseTheme('Light');
+
+  await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
+  try {
+    await settle(400);
+    const forcedPlain = await rowCue(6);
+    const forcedCurrent = await rowCue(4);
+    check('in forced colors the current unselected row looks different from a plain row (dashed outline or another left edge)', forcedCurrent.outlineStyle !== forcedPlain.outlineStyle || forcedCurrent.borderLeftColor !== forcedPlain.borderLeftColor, { forcedCurrent, forcedPlain });
+    check('in forced colors that outline is dashed', forcedCurrent.outlineStyle === 'dashed', forcedCurrent);
+    await gridShot('current-row-forced-colors');
+  } finally {
+    await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
+  }
 }
 
 const lookIn = () => ev(`document.querySelector('[role=combobox]').value`);
