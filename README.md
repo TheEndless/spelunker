@@ -39,7 +39,8 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Search everywhere.** Pick any folders, or choose **This PC (all drives)** to search every local fixed drive.
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
 - **Results map.** A treemap below the results shows where your matches are: rectangle area is file size or match count, color is file type or age. It fills in as the search runs, click a rectangle to select the file, Ctrl+click to zoom into its folder, and `Ctrl+Shift+M` hides it. Tiles are shaded like lit cushions, with a Flat option in Settings.
-- **Real Windows integration.** Right-click a result for the genuine Windows context menu, with Spelunker's own entries (open containing folder, copy path, copy name, copy matching lines) on top. Right-click a folder, a drive, or **This PC** in Explorer and choose **Search with Spelunker**.
+- **Select many, drag them out.** Select results the way you do in File Explorer (Ctrl+click, Shift+click, Shift with the arrow keys, Ctrl+A), see the count and total size in the status bar, and drag the selection out of the window into Explorer, an email or a browser upload as real files. Right-click a selection for the Windows context menu of every selected file.
+- **Real Windows integration.** Right-click a result for the genuine Windows context menu, with Spelunker's own entries on top (open containing folder, copy path, copy name, copy matching lines, or copy paths and copy names for several files). Right-click a folder, a drive, or **This PC** in Explorer and choose **Search with Spelunker**.
 - **Your columns, your way.** Resize, reorder, show or hide columns, and let them fill the window automatically. Dates follow your Windows regional format.
 - **12 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows.
 - **Keyboard first.** Every pane, column, and splitter works without a mouse. Press `F1` in the app for the full list.
@@ -76,8 +77,12 @@ Name, content, and filters combine with AND.
 | `Ctrl+T` or `Ctrl+F` | Go to Containing text |
 | `Ctrl+L` | Go to Look in |
 | `Up` / `Down`, `Home` / `End`, `Page Up` / `Page Down` | Move through the results |
-| `Enter` on a result | Open the file |
-| `Menu` key or `Shift+F10` | Context menu for the selected result |
+| `Shift` + arrows or click | Select a range |
+| `Ctrl` + click | Add or remove a result |
+| `Ctrl` + arrows, then `Ctrl+Space` | Move without selecting, then toggle |
+| `Ctrl+A` in the results | Select every result |
+| `Enter` on a result | Open the current file |
+| `Menu` key or `Shift+F10` | Context menu for the selected results |
 | `F3` / `Shift+F3` | Next / previous match in the preview |
 | `Ctrl+E` | Export results (CSV or plain text) |
 | `F6` / `Shift+F6` | Next / previous pane |
