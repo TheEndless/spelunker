@@ -320,9 +320,11 @@ pub fn show_shell_menu(
     })
 }
 
-/// Starts a native drag of the files. Refused unless the physical primary mouse button is down
-/// (see `file_drag::start`). A synchronous command, so it runs on the window's thread, which is
-/// where OLE needs the drag to run.
+/// Starts a native drag of the files. Refused unless the physical primary mouse button is down,
+/// this window is the foreground window, and the top-level window under the pointer is this one,
+/// all checked before the paths are parsed and again right before the drag (see
+/// `file_drag::start`). A synchronous command, so it runs on the window's thread, which is where
+/// OLE needs the drag to run.
 #[tauri::command]
 pub fn start_file_drag(
     window: tauri::WebviewWindow,

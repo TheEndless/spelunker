@@ -12,14 +12,15 @@
 
 use crate::modal_guard;
 use crate::shell_items::parse_paths;
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::System::Ole::{
     IDropSource, DROPEFFECT, DROPEFFECT_COPY, DROPEFFECT_LINK, DROPEFFECT_MOVE,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use windows::Win32::UI::Shell::SHDoDragDrop;
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_SWAPBUTTON,
+    GetAncestor, GetCursorPos, GetForegroundWindow, GetSystemMetrics, WindowFromPoint, GA_ROOT,
+    SM_SWAPBUTTON,
 };
 
 /// How a drag ended, for the page.
@@ -66,7 +67,7 @@ pub fn button_allows_drag(left_down: bool, right_down: bool, buttons_swapped: bo
 pub enum DragRefusal {
     ButtonUp,
     WindowNotForeground,
-    CursorOutsideWindow,
+    PointerNotOverWindow,
 }
 
 impl DragRefusal {
@@ -77,8 +78,8 @@ impl DragRefusal {
             DragRefusal::WindowNotForeground => {
                 "The drag did not start because Spelunker is not the active window."
             }
-            DragRefusal::CursorOutsideWindow => {
-                "The drag did not start because the pointer is outside the Spelunker window."
+            DragRefusal::PointerNotOverWindow => {
+                "The drag did not start because the pointer is not over the Spelunker window."
             }
         }
     }
@@ -87,49 +88,54 @@ impl DragRefusal {
 /// Whether the input state allows a drag to start. The physical primary button must be down. The
 /// button state is global, so a button held in another program would pass that test alone. The
 /// window must therefore also be the foreground window (a real press on a row activates it) and
-/// the cursor must lie inside it.
+/// the window under the pointer must be ours (not merely the cursor inside our rectangle, which a
+/// topmost window can cover).
 pub fn drag_may_start(
     left_down: bool,
     right_down: bool,
     buttons_swapped: bool,
     window_is_foreground: bool,
-    cursor_inside_window: bool,
+    pointer_over_our_window: bool,
 ) -> Result<(), DragRefusal> {
     if !button_allows_drag(left_down, right_down, buttons_swapped) {
         Err(DragRefusal::ButtonUp)
     } else if !window_is_foreground {
         Err(DragRefusal::WindowNotForeground)
-    } else if !cursor_inside_window {
-        Err(DragRefusal::CursorOutsideWindow)
+    } else if !pointer_over_our_window {
+        Err(DragRefusal::PointerNotOverWindow)
     } else {
         Ok(())
     }
 }
 
-/// Whether the point (`x`, `y`) lies in the rectangle, with the right and bottom edges outside, as
-/// Windows treats rectangles.
-fn rect_contains(rect: &RECT, x: i32, y: i32) -> bool {
-    x >= rect.left && x < rect.right && y >= rect.top && y < rect.bottom
+/// Whether `root_under_pointer` (the top-level window under the cursor) is our window. A null
+/// handle on either side, which is what a failed lookup gives, never counts as ours.
+fn is_our_window(root_under_pointer: HWND, ours: HWND) -> bool {
+    !ours.is_invalid() && root_under_pointer == ours
 }
 
 /// Reads the live input state for `hwnd` and checks it with `drag_may_start`. The one place both
 /// checks in `start` go through, so they cannot drift apart. A failed read counts against the drag.
+///
+/// The pointer test asks which top-level window is under the cursor rather than whether the cursor
+/// lies in our rectangle, so a topmost window over Spelunker counts as not ours. Then a release in
+/// the last instant before the drag starts drops on our own drop target, whose events for these
+/// files the page ignores, and never on another program.
 fn live_input_refusal(hwnd: HWND) -> Option<DragRefusal> {
-    // SAFETY: plain reads of the input state, a system setting and window state. The out pointers
-    // point at locals that live across the calls. The high bit of GetAsyncKeyState (a negative
-    // value) means the button is down now.
-    let (left_down, right_down, buttons_swapped, window_is_foreground, cursor_inside_window) = unsafe {
+    // SAFETY: plain reads of the input state, a system setting and window state. The out pointer
+    // points at a local that lives across the call. The high bit of GetAsyncKeyState (a negative
+    // value) means the button is down now. WindowFromPoint and GetAncestor return a null handle
+    // on failure, which `is_our_window` refuses.
+    let (left_down, right_down, buttons_swapped, window_is_foreground, pointer_over_our_window) = unsafe {
         let mut cursor = POINT::default();
-        let mut window_rect = RECT::default();
-        let cursor_inside_window = GetCursorPos(&mut cursor).is_ok()
-            && GetWindowRect(hwnd, &mut window_rect).is_ok()
-            && rect_contains(&window_rect, cursor.x, cursor.y);
+        let pointer_over_our_window = GetCursorPos(&mut cursor).is_ok()
+            && is_our_window(GetAncestor(WindowFromPoint(cursor), GA_ROOT), hwnd);
         (
             GetAsyncKeyState(i32::from(VK_LBUTTON.0)) < 0,
             GetAsyncKeyState(i32::from(VK_RBUTTON.0)) < 0,
             GetSystemMetrics(SM_SWAPBUTTON) != 0,
             GetForegroundWindow() == hwnd,
-            cursor_inside_window,
+            pointer_over_our_window,
         )
     };
     drag_may_start(
@@ -137,7 +143,7 @@ fn live_input_refusal(hwnd: HWND) -> Option<DragRefusal> {
         right_down,
         buttons_swapped,
         window_is_foreground,
-        cursor_inside_window,
+        pointer_over_our_window,
     )
     .err()
 }
@@ -158,8 +164,8 @@ fn effect_name(effect: DROPEFFECT) -> &'static str {
 /// thread, inside its OLE apartment, and blocks it for the whole drag (OLE runs its own loop).
 ///
 /// Refused while another menu or drag is open, and whenever `live_input_refusal` objects: the
-/// physical primary button is not down, the window is not the foreground window, or the cursor
-/// is outside it. These matter: a drag that starts with the button already released does not end
+/// physical primary button is not down, the window is not the foreground window, or the top-level
+/// window under the pointer is not this one. These matter: a drag that starts with the button already released does not end
 /// empty, it DROPS at once onto whatever is under the real cursor. They also mean synthetic input
 /// that presses no physical button (a script driving the page) can never start one, and neither
 /// can a script while the user holds a button in another program.
@@ -239,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn a_held_primary_button_in_the_foreground_window_with_the_cursor_inside_may_drag() {
+    fn a_held_primary_button_in_the_foreground_window_with_the_pointer_over_it_may_drag() {
         assert_eq!(drag_may_start(true, false, false, true, true), Ok(()));
         assert_eq!(drag_may_start(false, true, true, true, true), Ok(()));
     }
@@ -266,10 +272,10 @@ mod tests {
     }
 
     #[test]
-    fn a_cursor_outside_the_window_is_refused() {
+    fn a_pointer_not_over_our_window_is_refused() {
         assert_eq!(
             drag_may_start(true, false, false, true, false),
-            Err(DragRefusal::CursorOutsideWindow)
+            Err(DragRefusal::PointerNotOverWindow)
         );
     }
 
@@ -278,7 +284,7 @@ mod tests {
         let reasons = [
             DragRefusal::ButtonUp.reason(),
             DragRefusal::WindowNotForeground.reason(),
-            DragRefusal::CursorOutsideWindow.reason(),
+            DragRefusal::PointerNotOverWindow.reason(),
         ];
         assert_ne!(reasons[0], reasons[1]);
         assert_ne!(reasons[1], reasons[2]);
@@ -286,19 +292,14 @@ mod tests {
     }
 
     #[test]
-    fn the_window_rectangle_holds_its_left_and_top_edges_but_not_its_right_and_bottom() {
-        let rect = RECT {
-            left: 10,
-            top: 20,
-            right: 110,
-            bottom: 220,
-        };
-        assert!(rect_contains(&rect, 10, 20));
-        assert!(rect_contains(&rect, 109, 219));
-        assert!(!rect_contains(&rect, 110, 100));
-        assert!(!rect_contains(&rect, 50, 220));
-        assert!(!rect_contains(&rect, 9, 100));
-        assert!(!rect_contains(&rect, 50, 19));
+    fn only_our_own_root_window_counts_and_a_failed_lookup_never_does() {
+        let ours = HWND(0x1234 as *mut core::ffi::c_void);
+        let other = HWND(0x5678 as *mut core::ffi::c_void);
+        let failed = HWND(std::ptr::null_mut());
+        assert!(is_our_window(ours, ours));
+        assert!(!is_our_window(other, ours), "a window over ours");
+        assert!(!is_our_window(failed, ours), "a failed lookup");
+        assert!(!is_our_window(failed, failed), "no window of ours at all");
     }
 
     #[test]
