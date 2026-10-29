@@ -23,7 +23,7 @@ try {
   // A clean start with the chosen theme, as a first run would look, with Matches shown since this
   // is a search for text (it is hidden by default). The preferences are set before the page's own
   // scripts run, because the page saves its own on the way out and would overwrite them.
-  const preferences = { theme, columns: { order: [], hidden: [], widths: {}, autoSize: true } };
+  const preferences = { theme, mapColor: 'type', columns: { order: [], hidden: [], widths: {}, autoSize: true } };
   // New-document scripts only run once the page domain is enabled.
   await send('Page.enable');
   await send('Page.addScriptToEvaluateOnNewDocument', {
