@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_EDITOR, editorTemplate, normalizeEditor } from './editors';
+import { DEFAULT_EDITOR, editorLaunch, normalizeEditor } from './editors';
 
-describe('editorTemplate', () => {
-  it('has no template for the system default, which opens the file without a line', () => {
-    expect(editorTemplate(DEFAULT_EDITOR)).toBeNull();
+describe('editorLaunch', () => {
+  it('asks for nothing for the system default, which opens the file without a line', () => {
+    expect(editorLaunch(DEFAULT_EDITOR)).toBeNull();
   });
 
-  it('knows how to open VS Code and Notepad++ at a line', () => {
-    expect(editorTemplate({ id: 'vscode', customTemplate: '' })).toBe('code.cmd -g "{path}:{line}"');
-    expect(editorTemplate({ id: 'notepadpp', customTemplate: '' })).toBe('notepad++ -n{line} "{path}"');
+  it('names VS Code and Notepad++ and sends no command line, since the backend holds theirs', () => {
+    expect(editorLaunch({ id: 'vscode', customTemplate: 'ignored' })).toEqual({ editor: 'vscode', customTemplate: '' });
+    expect(editorLaunch({ id: 'notepadpp', customTemplate: '' })).toEqual({ editor: 'notepadpp', customTemplate: '' });
   });
 
-  it('uses the custom command, trimmed, and treats a blank one as unset', () => {
-    expect(editorTemplate({ id: 'custom', customTemplate: '  ed +{line} "{path}" ' })).toBe('ed +{line} "{path}"');
-    expect(editorTemplate({ id: 'custom', customTemplate: '   ' })).toBeNull();
+  it('sends the custom command trimmed, and treats a blank one as unset', () => {
+    expect(editorLaunch({ id: 'custom', customTemplate: '  ed +{line} "{path}" ' })).toEqual({ editor: 'custom', customTemplate: 'ed +{line} "{path}"' });
+    expect(editorLaunch({ id: 'custom', customTemplate: '   ' })).toBeNull();
   });
 });
 

@@ -1,7 +1,8 @@
+import { findSpelunkerPage } from './target.mjs';
+
 // Minimal CDP client for the real Spelunker window (WebView2 remote debugging on port 9222).
 export async function connect() {
-  const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
-  const page = targets.find((target) => target.type === 'page');
+  const page = await findSpelunkerPage();
   const socket = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve) => (socket.onopen = resolve));
   let nextId = 1;
@@ -75,7 +76,7 @@ export const PAGE_HELPERS = `
     },
     resetCriteria() {
       for (const t of ['Subfolders']) window.__sp.setChecked(t, true);
-      for (const t of ['Hidden files', 'Binary files', 'Junctions', 'Use the Name box', 'Multi-line']) {
+      for (const t of ['Hidden files', 'Binary files', 'Junctions', 'Multi-line']) {
         const b = window.__sp.checkbox(t);
         if (b && b.checked && !b.disabled) b.click();
       }

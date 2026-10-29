@@ -85,7 +85,10 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn matched_event() -> SearchEvent {
-        SearchEvent::Progress { files_scanned: 1 }
+        SearchEvent::Progress {
+            files_scanned: 1,
+            folder: Default::default(),
+        }
     }
 
     #[test]
@@ -157,7 +160,10 @@ mod tests {
                     for _ in 0..20_000 {
                         gate.when_open(|callback, counters| {
                             counters.files_matched.fetch_add(1, Ordering::Relaxed);
-                            callback(SearchEvent::Progress { files_scanned: 0 });
+                            callback(SearchEvent::Progress {
+                                files_scanned: 0,
+                                folder: Default::default(),
+                            });
                         });
                     }
                 })

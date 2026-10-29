@@ -101,7 +101,7 @@
     padding: 4px;
     background: var(--surface-raised);
     border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border-radius: 5px;
     box-shadow: var(--shadow);
   }
   button {
@@ -112,7 +112,7 @@
     text-align: left;
     padding: 5px 10px 5px 6px;
     border: 0;
-    border-radius: 4px;
+    border-radius: 3px;
     background: none;
   }
   button:hover,

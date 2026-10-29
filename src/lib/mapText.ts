@@ -1,7 +1,7 @@
 import { formatSize, modifiedLabel } from './format';
-import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
+import { AGE_LABELS, CATEGORY_LABELS, SIZE_LABELS, type MapColors } from './treemapColors';
 import { RectKind, type Layout, type Metric } from './treemapLayout';
-import type { ColorMode } from './treemapPaint';
+import { colorFills, type ColorMode } from './treemapPaint';
 import { withShortcut } from './shortcuts';
 import { count as counted } from './statusSummary';
 import type { DisplayRow } from './types';
@@ -35,19 +35,19 @@ export interface LegendEntry {
 }
 
 /**
- * The categories or age buckets present in the view. Categories come heaviest first. Age buckets
- * keep their own order, Today to Unknown, since a scale read out of order means nothing.
+ * The categories, age buckets, or size classes present in the view. Categories come heaviest first.
+ * Age buckets and size classes keep their own order, since a scale read out of order means nothing.
  */
 export function legendEntries(
-  layout: Pick<Layout, 'categoryWeight' | 'ageWeight'>,
+  layout: Pick<Layout, 'categoryWeight' | 'ageWeight' | 'sizeWeight'>,
   colorMode: ColorMode,
   colors: MapColors,
   metric: Metric,
 ): LegendEntry[] {
   const byType = colorMode === 'type';
-  const weights = byType ? layout.categoryWeight : layout.ageWeight;
-  const labels = byType ? CATEGORY_LABELS : AGE_LABELS;
-  const fills = byType ? colors.category : colors.age;
+  const weights = byType ? layout.categoryWeight : colorMode === 'age' ? layout.ageWeight : layout.sizeWeight;
+  const labels = byType ? CATEGORY_LABELS : colorMode === 'age' ? AGE_LABELS : SIZE_LABELS;
+  const fills = colorFills(colors, colorMode);
   const present: { bucket: number; weight: number }[] = [];
   for (let bucket = 0; bucket < weights.length; bucket++) {
     if (weights[bucket] > 0) present.push({ bucket, weight: weights[bucket] });

@@ -17,6 +17,9 @@ $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9222'
 $env:WEBVIEW2_USER_DATA_FOLDER = $profile
 $env:SPELUNKER_NO_FOCUS = '1'
 $process = & (Join-Path $PSScriptRoot 'start-quiet.ps1') (Join-Path $repo 'target\debug\spelunker-app.exe') -OffScreenWindowClass 'Tauri Window'
+# The app keeps running for the suites, but the shell must not keep the debug port switched on for
+# every WebView2 program started from it later: the app has its copy of the variables.
+Remove-Item Env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS, Env:WEBVIEW2_USER_DATA_FOLDER, Env:SPELUNKER_NO_FOCUS -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 6
 "started pid $($process.Id)"
 (Invoke-WebRequest http://127.0.0.1:9222/json -UseBasicParsing).StatusCode

@@ -41,16 +41,11 @@ export const ALL_DRIVES_LABEL = 'This PC (all drives)';
 /** The words the backend treats as "every local drive", compared in lower case. Keep in step with drives.rs. */
 const ALL_DRIVES_WORDS = ['this pc', 'all drives', 'this pc (all drives)', 'computer'];
 
-/** True when the whole box asks for every drive. A list that merely includes it is not "all drives". */
-export function isAllDrives(value: string): boolean {
-  return ALL_DRIVES_WORDS.includes(value.trim().toLowerCase());
-}
+/** `This PC` followed by drive letters in parentheses, which is what the box shows after choosing This PC. Keep in step with drives.rs. */
+const THIS_PC_WITH_DRIVES = /^this pc \(\s*[a-z]:(\s*,\s*[a-z]:)*\s*\)$/;
 
-/**
- * Switches the box between "all drives" and what was there before. Turning it on remembers the
- * current text so turning it off puts it back.
- */
-export function toggleAllDrives(current: string, remembered: string): { value: string; remembered: string } {
-  if (isAllDrives(current)) return { value: remembered, remembered: '' };
-  return { value: ALL_DRIVES_LABEL, remembered: current.trim() };
+/** True when the whole box asks for the drives of this PC. A list that merely includes it is not "all drives". */
+export function isAllDrives(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return ALL_DRIVES_WORDS.includes(normalized) || THIS_PC_WITH_DRIVES.test(normalized);
 }

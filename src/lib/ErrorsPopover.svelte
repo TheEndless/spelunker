@@ -100,7 +100,7 @@
     flex-direction: column;
     background: var(--surface-raised);
     border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border-radius: 5px;
     box-shadow: var(--shadow);
     font-size: var(--text-small);
   }
@@ -136,9 +136,11 @@
   }
   .path {
     overflow-wrap: anywhere;
+    user-select: text;
   }
   .reason {
     color: var(--text-muted);
+    user-select: text;
   }
   .more {
     color: var(--text-muted);

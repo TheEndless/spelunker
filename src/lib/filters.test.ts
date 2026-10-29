@@ -147,7 +147,7 @@ describe('resolveDateFilter', () => {
 });
 
 describe('activeFilterCount', () => {
-  const none = { size: size({}), modified: date({}), created: date({}), nameIsRegex: false, multiLine: false };
+  const none = { size: size({}), modified: date({}), created: date({}), multiLine: false };
 
   it('is zero when nothing is set', () => {
     expect(activeFilterCount(none)).toBe(0);
@@ -161,10 +161,9 @@ describe('activeFilterCount', () => {
         size: size({ mode: 'between', value: '1', unit: 'MB', value2: '2', unit2: 'MB' }),
         modified: date({ mode: 'within', amount: '7', unit: 'days' }),
         created: date({ mode: 'before', date: '2026-01-01' }),
-        nameIsRegex: true,
         multiLine: true,
       }),
-    ).toBe(5);
+    ).toBe(4);
   });
 
   it('counts a filter that is switched on even before its values are filled in', () => {

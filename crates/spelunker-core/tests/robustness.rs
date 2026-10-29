@@ -129,7 +129,7 @@ fn progress_events_report_files_scanned_every_256_files() {
         &SearchConfig::new(vec![root.path().to_path_buf()]),
         &CancelToken::new(),
         move |event| {
-            if let SearchEvent::Progress { files_scanned } = event {
+            if let SearchEvent::Progress { files_scanned, .. } = event {
                 sink.lock().unwrap().push(files_scanned);
             }
         },

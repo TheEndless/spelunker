@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -103,32 +103,108 @@ fn wait_for_walk(walk: JoinHandle<()>, done: Receiver<()>, cancel: &CancelToken)
     }
 }
 
+/// How many levels of folders, counting the root as the first, are visited one at a time in name
+/// order. Below them the walk is parallel. Measured on four drives and 3.5 million files, each
+/// extra level costs more: sorting every level took about six times as long, two levels about 70%
+/// more, and one level about 10% more than the parallel walk.
+const ORDERED_LEVELS: usize = 1;
+
 fn run_walk<F>(shared: &Arc<Shared<F>>)
 where
     F: Fn(SearchEvent) + Send + Sync + 'static,
 {
-    let Some(first_root) = shared.config.roots.first().cloned() else {
-        return;
-    };
-    let walker = build_walker(&first_root, &shared.config).build_parallel();
-    walker.run(|| {
-        let shared = Arc::clone(shared);
-        let first_root = first_root.clone();
-        Box::new(move |entry| {
-            if shared.cancel.is_cancelled() {
-                return WalkState::Quit;
-            }
-            shared.visit(entry, &first_root);
-            WalkState::Continue
-        })
-    });
+    // One root after another, in the order given, so results and progress follow the order the
+    // user wrote. A single walker given every root would take them off a stack in an order of its
+    // own, often the last one first.
+    for root in &shared.config.roots {
+        if shared.cancel.is_cancelled() {
+            return;
+        }
+        walk_in_order(shared, root, 0);
+    }
 }
 
-fn build_walker(first_root: &Path, config: &SearchConfig) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(first_root);
-    for root in &config.roots[1..] {
-        builder.add(root);
+/// The levels of folders below the root that a search goes into: none for a search without
+/// subfolders, and unlimited when there is no depth limit.
+fn folder_levels(config: &SearchConfig) -> Option<usize> {
+    if config.recurse {
+        config.max_depth
+    } else {
+        Some(0)
     }
+}
+
+/// Searches `folder`, which is `level` folders below its root. The first `ORDERED_LEVELS` levels are
+/// done in name order: the files directly in the folder (in parallel, so a folder of many files is
+/// not read one by one), then each subfolder in turn. Deeper folders are walked by all the threads,
+/// which finish a whole subfolder before the next one starts.
+fn walk_in_order<F>(shared: &Arc<Shared<F>>, folder: &Path, level: usize)
+where
+    F: Fn(SearchEvent) + Send + Sync + 'static,
+{
+    let levels_below = folder_levels(&shared.config).map(|levels| levels.saturating_sub(level));
+    // A walker finds a link that loops back by comparing each folder with the ones above it, which
+    // only works inside one walk. Split into several, a loop would be entered once more and its
+    // files reported twice, so with links followed the root is one walk and the order is not kept.
+    if level >= ORDERED_LEVELS || shared.config.follow_links {
+        walk_in_parallel(shared, folder, levels_below, None);
+        return;
+    }
+    // The walk of the files also sees the subfolders, with every filter applied, so they are taken
+    // from it and no second look at the folder is needed.
+    let subfolders = Mutex::new(Vec::new());
+    walk_in_parallel(shared, folder, Some(0), Some(&subfolders));
+    if levels_below == Some(0) {
+        return;
+    }
+    let mut subfolders = subfolders.into_inner().unwrap_or_default();
+    subfolders.sort_by_cached_key(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    });
+    for subfolder in subfolders {
+        if shared.cancel.is_cancelled() {
+            return;
+        }
+        walk_in_order(shared, &subfolder, level + 1);
+    }
+}
+
+/// Walks `folder` and `levels_below` levels under it (all of them when None) with every thread. The
+/// folders found directly inside it are added to `subfolders` when that is given.
+fn walk_in_parallel<F>(
+    shared: &Arc<Shared<F>>,
+    folder: &Path,
+    levels_below: Option<usize>,
+    subfolders: Option<&Mutex<Vec<PathBuf>>>,
+) where
+    F: Fn(SearchEvent) + Send + Sync + 'static,
+{
+    build_walker(folder, &shared.config, levels_below)
+        .build_parallel()
+        .run(|| {
+            let shared = Arc::clone(shared);
+            Box::new(move |entry| {
+                if shared.cancel.is_cancelled() {
+                    return WalkState::Quit;
+                }
+                if let (Some(subfolders), Ok(found)) = (subfolders, &entry) {
+                    if found.depth() == 1 && found.file_type().is_some_and(|kind| kind.is_dir()) {
+                        if let Ok(mut list) = subfolders.lock() {
+                            list.push(found.path().to_path_buf());
+                        }
+                    }
+                }
+                shared.visit(entry, folder);
+                WalkState::Continue
+            })
+        });
+}
+
+/// A walker over `root` and `levels_below` levels of folders under it (all of them when None).
+fn build_walker(root: &Path, config: &SearchConfig, levels_below: Option<usize>) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(root);
 
     // Spelunker searches everything the user points it at, so ignore files such as .gitignore do not apply.
     builder
@@ -139,12 +215,7 @@ fn build_walker(first_root: &Path, config: &SearchConfig) -> WalkBuilder {
         .follow_links(config.follow_links);
 
     // ignore counts the root as depth 0, so "levels below the root" is one more than that.
-    let folder_levels = if config.recurse {
-        config.max_depth
-    } else {
-        Some(0)
-    };
-    builder.max_depth(folder_levels.map(|levels| levels + 1));
+    builder.max_depth(levels_below.map(|levels| levels + 1));
 
     let excluded: HashSet<String> = config
         .exclude_dirs
@@ -182,11 +253,11 @@ fn has_system_attribute(_entry: &ignore::DirEntry) -> bool {
 impl<F: Fn(SearchEvent)> Shared<F> {
     /// Examines one walk entry. Every count and every event goes through the gate, and a closed
     /// gate means the search is over, so the worker stops doing anything further.
-    fn visit(&self, entry: Result<ignore::DirEntry, ignore::Error>, first_root: &Path) {
+    fn visit(&self, entry: Result<ignore::DirEntry, ignore::Error>, root: &Path) {
         let entry = match entry {
             Ok(entry) => entry,
             Err(error) => {
-                let path = error_path(&error).unwrap_or_else(|| first_root.to_path_buf());
+                let path = error_path(&error).unwrap_or_else(|| root.to_path_buf());
                 self.report_error(path, error.to_string());
                 return;
             }
@@ -200,6 +271,11 @@ impl<F: Fn(SearchEvent)> Shared<F> {
             if scanned.is_multiple_of(PROGRESS_INTERVAL) {
                 callback(SearchEvent::Progress {
                     files_scanned: scanned,
+                    folder: entry
+                        .path()
+                        .parent()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default(),
                 });
             }
         });

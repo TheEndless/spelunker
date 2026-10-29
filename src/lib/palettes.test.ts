@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contrast } from './colors';
+import { channels, contrast, perceptualDistance } from './colors';
 import {
   CONTRAST_CHECKS,
   PALETTES,
@@ -16,6 +16,42 @@ import {
 const everyVariant = PALETTES.flatMap((palette) =>
   (['light', 'dark'] as const).map((mode) => ({ palette, mode, tokens: palette[mode] })),
 );
+
+describe('the highlight behind found text', () => {
+  const strongestChannel = (color: string) => {
+    const parts = channels(color);
+    return parts.indexOf(Math.max(...parts));
+  };
+
+  it("is a tint of the theme's own accent, so a blue theme has a blue highlight", () => {
+    expect(strongestChannel(PALETTES.find((palette) => palette.id === 'github')!.dark['match-bg'])).toBe(2);
+    expect(strongestChannel(PALETTES.find((palette) => palette.id === 'github')!.light['match-bg'])).toBe(2);
+    for (const palette of PALETTES) {
+      for (const mode of ['light', 'dark'] as const) {
+        const tokens = palette[mode];
+        expect(strongestChannel(tokens['match-bg']), `${palette.id} ${mode}`).toBe(strongestChannel(tokens.accent));
+      }
+    }
+  });
+
+  it('is not the color of a selected row', () => {
+    for (const palette of PALETTES) {
+      for (const mode of ['light', 'dark'] as const) {
+        const tokens = palette[mode];
+        expect(perceptualDistance(tokens['match-bg'], tokens['row-selected']), `${palette.id} ${mode}`).toBeGreaterThan(0.015);
+      }
+    }
+  });
+
+  it('keeps the text on it readable in every theme', () => {
+    for (const palette of PALETTES) {
+      for (const mode of ['light', 'dark'] as const) {
+        const tokens = palette[mode];
+        expect(contrast(tokens['match-text'], tokens['match-bg']), `${palette.id} ${mode}`).toBeGreaterThanOrEqual(7);
+      }
+    }
+  });
+});
 
 describe('the palette list', () => {
   it('has unique ids and non-empty labels', () => {
@@ -130,7 +166,6 @@ describe('tokensFromSeed', () => {
     border: '#D9D2BC',
     accent: '#B5D6F0',
     danger: '#F5A0A0',
-    highlight: '#F6E7B0',
   };
 
   it('nudges text, muted text, danger, and the accent label until they are readable', () => {

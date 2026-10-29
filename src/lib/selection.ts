@@ -124,6 +124,15 @@ export function pruneSelection(state: SelectionState, rows: PathRow[]): Selectio
   return unchanged ? state : { anchor, current, paths };
 }
 
+/**
+ * The file the preview shows and the map outlines: the current row while anything is selected, and
+ * nothing once the selection is empty, as after Ctrl+click deselects the last selected file. The
+ * current row may itself be unselected (Ctrl+Arrow moves it without selecting), and it still leads.
+ */
+export function shownPath(state: SelectionState): string | null {
+  return state.paths.size > 0 ? state.current : null;
+}
+
 /** The selected rows in list order. */
 export function selectedRows<T extends PathRow>(state: SelectionState, rows: T[]): T[] {
   if (state.paths.size === 0) return [];

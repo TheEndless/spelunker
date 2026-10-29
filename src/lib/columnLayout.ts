@@ -6,6 +6,8 @@ export const COLUMN_IDS: readonly ColumnId[] = ['name', 'folder', 'hits', 'size'
 
 export const MIN_COLUMN_WIDTH = 48;
 export const MAX_COLUMN_WIDTH = 1200;
+/** A pane narrower than this has not been measured yet, or is too small to lay columns out in. */
+export const MIN_PANE_WIDTH = 200;
 
 interface ColumnDefinition {
   label: string;
@@ -14,12 +16,12 @@ interface ColumnDefinition {
 }
 
 export const COLUMN_DEFINITIONS: Record<ColumnId, ColumnDefinition> = {
-  name: { label: 'Name', align: 'left', defaultWidth: 200 },
-  folder: { label: 'Folder', align: 'left', defaultWidth: 240 },
+  name: { label: 'Name', align: 'left', defaultWidth: 300 },
+  folder: { label: 'Folder', align: 'left', defaultWidth: 420 },
   hits: { label: 'Matches', align: 'right', defaultWidth: 80 },
-  size: { label: 'Size', align: 'right', defaultWidth: 76 },
-  modified: { label: 'Modified', align: 'left', defaultWidth: 130 },
-  type: { label: 'Type', align: 'left', defaultWidth: 150 },
+  size: { label: 'Size', align: 'right', defaultWidth: 80 },
+  modified: { label: 'Modified', align: 'left', defaultWidth: 150 },
+  type: { label: 'Type', align: 'left', defaultWidth: 190 },
 };
 
 /** Which columns the results grid shows, in what order, and how wide. */
@@ -28,15 +30,25 @@ export interface ColumnLayout {
   order: ColumnId[];
   hidden: ColumnId[];
   widths: Record<ColumnId, number>;
-  /** Columns are sized to their content when a search finishes, until the user sizes one by hand. */
+  /** Columns are fitted to the rows in view as results arrive, until the user sizes one by hand. Off unless asked for. */
   autoSize: boolean;
+  /** Which rules the layout was last made under, so a saved one can be brought up to date once. */
+  version: number;
 }
+
+/**
+ * Layouts before 2 showed Matches, which is now hidden by default, so older ones get it hidden once.
+ * Layouts before 3 fitted columns to their content as results arrived, which now has to be asked
+ * for, so older ones have it turned off once. Layouts before 4 saved the widths as squeezed to fit
+ * the window, which left Modified and Type too narrow, so older ones get the default widths once.
+ */
+const LAYOUT_VERSION = 4;
 
 const defaultWidths = (): Record<ColumnId, number> =>
   Object.fromEntries(COLUMN_IDS.map((id) => [id, COLUMN_DEFINITIONS[id].defaultWidth])) as Record<ColumnId, number>;
 
 export function defaultLayout(): ColumnLayout {
-  return { order: [...COLUMN_IDS], hidden: [], widths: defaultWidths(), autoSize: true };
+  return { order: [...COLUMN_IDS], hidden: ['hits'], widths: defaultWidths(), autoSize: false, version: LAYOUT_VERSION };
 }
 
 export const visibleColumns = (layout: ColumnLayout): ColumnId[] =>
@@ -70,16 +82,12 @@ export function moveColumnByStep(layout: ColumnLayout, id: ColumnId, direction: 
   return direction === -1 ? moveColumnBefore(layout, id, neighbour) : moveColumnBefore(layout, neighbour, id);
 }
 
-export function resetWidths(layout: ColumnLayout): ColumnLayout {
-  return { ...layout, widths: defaultWidths(), autoSize: true };
-}
-
-/** When widths are fitted automatically, columns give up space in this order, and never below their floor. */
+/** When the pane is too narrow for the columns, they give up space in this order, and never below their floor. */
 const SHRINK_ORDER: { id: ColumnId; floor: number }[] = [
+  { id: 'type', floor: 90 },
+  { id: 'modified', floor: 130 },
   { id: 'folder', floor: 90 },
-  { id: 'type', floor: 70 },
   { id: 'name', floor: 100 },
-  { id: 'modified', floor: 96 },
   { id: 'size', floor: 56 },
   { id: 'hits', floor: 72 },
 ];
@@ -103,72 +111,52 @@ export function shrinkToFit(widths: Record<ColumnId, number>, visible: ColumnId[
   return result;
 }
 
+/** Name and Folder are the text people read most, so they share the spare room equally when both are shown. */
+const SHARED_GROW: ColumnId[] = ['name', 'folder'];
+
 /**
- * Who takes the spare room when the columns are narrower than the pane, in order. Folder paths are
- * the longest text in a row, so Folder takes it all. Only if Folder is hidden does it go to the next
- * text column. The numeric columns never grow while a text column is shown.
+ * Who takes the spare room when neither Name nor Folder is shown, in order. The numeric columns
+ * never grow while a text column is shown.
  */
-const GROW_ORDER: ColumnId[] = ['folder', 'name', 'type', 'modified'];
+const GROW_ORDER: ColumnId[] = ['type', 'modified'];
 
 /**
  * Gives the spare room to one column so the grid fills its pane instead of leaving a blank strip
- * on the right: Folder, or the next text column if Folder is hidden. With none of those shown, the
- * shown columns share it equally. Widths already wide enough are left alone.
+ * on the right: Name and Folder share it, or the next text column if both are hidden. With none of
+ * those shown, the shown columns share it equally. Widths already wide enough are left alone.
  */
 export function growToFill(widths: Record<ColumnId, number>, visible: ColumnId[], available: number): Record<ColumnId, number> {
   const spare = Math.floor(available - visible.reduce((sum, id) => sum + widths[id], 0));
   if (spare <= 0 || visible.length === 0) return widths;
 
-  const receiver = GROW_ORDER.find((id) => visible.includes(id));
   const result = { ...widths };
+  const sharers = SHARED_GROW.filter((id) => visible.includes(id));
+  if (sharers.length > 0) {
+    shareRoom(result, sharers, spare);
+    return result;
+  }
+  const receiver = GROW_ORDER.find((id) => visible.includes(id));
   if (receiver !== undefined) {
     result[receiver] += spare;
     return result;
   }
-  // Only numeric columns are shown, so they share the room, with the rounding going to the first.
-  const share = Math.floor(spare / visible.length);
-  for (const id of visible) result[id] += share;
-  result[visible[0]] += spare - share * visible.length;
+  // Only numeric columns are shown, so they share the room.
+  shareRoom(result, visible, spare);
   return result;
 }
 
-/**
- * Rescales the visible columns, keeping their proportions, so together they fill exactly
- * `available` pixels. This is what keeps the grid filling its pane when the window, the splitter,
- * or the preview change its width. No column goes below the minimum, even if that means the total
- * cannot fit. Hidden columns are left alone.
- */
-export function scaleToFill(widths: Record<ColumnId, number>, visible: ColumnId[], available: number): Record<ColumnId, number> {
-  const target = Math.round(available);
-  const total = visible.reduce((sum, id) => sum + widths[id], 0);
-  if (visible.length === 0 || total <= 0 || total === target) return widths;
+/** Adds `spare` pixels to the given columns in equal parts, with the rounding going to the first. */
+function shareRoom(widths: Record<ColumnId, number>, receivers: ColumnId[], spare: number) {
+  const share = Math.floor(spare / receivers.length);
+  for (const id of receivers) widths[id] += share;
+  widths[receivers[0]] += spare - share * receivers.length;
+}
 
-  const result = { ...widths };
-  // Columns that would fall below the minimum are pinned there, and the rest share what is left.
-  let flexible = [...visible];
-  let room = target;
-  for (let pass = 0; pass < visible.length; pass++) {
-    const flexibleTotal = flexible.reduce((sum, id) => sum + widths[id], 0);
-    const factor = room / flexibleTotal;
-    const pinned = flexible.filter((id) => widths[id] * factor < MIN_COLUMN_WIDTH);
-    if (pinned.length === 0) break;
-    for (const id of pinned) {
-      result[id] = MIN_COLUMN_WIDTH;
-      room -= MIN_COLUMN_WIDTH;
-    }
-    flexible = flexible.filter((id) => !pinned.includes(id));
-    if (flexible.length === 0) return result;
-  }
-  const flexibleTotal = flexible.reduce((sum, id) => sum + widths[id], 0);
-  let assigned = 0;
-  for (const id of flexible) {
-    result[id] = Math.max(MIN_COLUMN_WIDTH, Math.floor((widths[id] * room) / flexibleTotal));
-    assigned += result[id];
-  }
-  // Whole pixels only: the rounding that is left goes to the widest column.
-  const widest = flexible.reduce((best, id) => (result[id] > result[best] ? id : best), flexible[0]);
-  result[widest] += room - assigned;
-  return result;
+/** The widths to show: the saved ones, made to fill the pane by the rules of `shrinkToFit` and `growToFill`. */
+export function widthsInPane(widths: Record<ColumnId, number>, visible: ColumnId[], available: number): Record<ColumnId, number> {
+  // Before the pane has been measured there is nothing sensible to fill.
+  if (available < MIN_PANE_WIDTH) return widths;
+  return growToFill(shrinkToFit(widths, visible, available), visible, available);
 }
 
 /**
@@ -217,12 +205,15 @@ export function normalizeLayout(raw: unknown): ColumnLayout {
   // A column the stored layout does not know (added in a later version) is appended.
   for (const id of COLUMN_IDS) if (!order.includes(id)) order.push(id);
 
-  let hidden = Array.isArray(source.hidden) ? [...new Set(source.hidden.filter(isColumnId))] : [];
+  let hidden = Array.isArray(source.hidden) ? [...new Set(source.hidden.filter(isColumnId))] : base.hidden;
+  const storedVersion = typeof source.version === 'number' ? source.version : 1;
+  if (storedVersion < 2 && !hidden.includes('hits')) hidden = [...hidden, 'hits'];
   // A grid needs at least one column, so if everything was hidden only Name is kept.
   if (COLUMN_IDS.every((id) => hidden.includes(id))) hidden = COLUMN_IDS.filter((id) => id !== 'name');
-  const layout: ColumnLayout = { order, hidden, widths: base.widths, autoSize: source.autoSize !== false };
+  const layout: ColumnLayout = { order, hidden, widths: base.widths, autoSize: storedVersion >= 3 && source.autoSize === true, version: LAYOUT_VERSION };
 
-  const storedWidths = typeof source.widths === 'object' && source.widths !== null ? (source.widths as Record<string, unknown>) : {};
+  const storedWidths =
+    storedVersion >= 4 && typeof source.widths === 'object' && source.widths !== null ? (source.widths as Record<string, unknown>) : {};
   for (const id of COLUMN_IDS) {
     const width = storedWidths[id];
     if (typeof width === 'number' && Number.isFinite(width)) layout.widths[id] = clampWidth(width);

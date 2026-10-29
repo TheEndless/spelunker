@@ -66,7 +66,7 @@ const beforeHide = await fill();
 await ev(`document.querySelector('button[aria-label="Hide the preview"]').click()`);
 await settleFrames(send, 900);
 const afterHide = await fill();
-check('hiding the preview widens the columns to the full width', fills(afterHide) && afterHide.total > beforeHide.total + 300, { beforeHide, afterHide });
+check('hiding the preview widens the columns to the full width', fills(afterHide) && afterHide.total > beforeHide.total + 250, { beforeHide, afterHide });
 
 summarize();
 close();

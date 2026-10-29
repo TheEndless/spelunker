@@ -43,9 +43,11 @@ pub struct SearchError {
 pub enum SearchEvent {
     File(FileResult),
     Error(SearchError),
-    /// Emitted every 256 files examined so a UI can show live progress.
+    /// Emitted every 256 files examined so a UI can show live progress, with the folder the walk
+    /// is in at that moment.
     Progress {
         files_scanned: u64,
+        folder: PathBuf,
     },
 }
 

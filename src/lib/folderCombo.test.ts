@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ALL_DRIVES_LABEL, applyChoice, currentSegment, filterRecents, isAllDrives, nextActiveIndex, toggleAllDrives } from './folderCombo';
+import { applyChoice, currentSegment, filterRecents, isAllDrives, nextActiveIndex } from './folderCombo';
 
 describe('currentSegment', () => {
   it('returns the whole value when there is no semicolon', () => {
@@ -107,19 +107,16 @@ describe('all drives', () => {
     expect(isAllDrives('My PC Games')).toBe(false);
   });
 
-  it('switching on remembers what was in the box', () => {
-    expect(toggleAllDrives('D:/Work; E:/Notes', '')).toEqual({ value: ALL_DRIVES_LABEL, remembered: 'D:/Work; E:/Notes' });
+  // The same cases as `a_this_pc_entry_may_list_the_drives_it_stands_for` in src-tauri/src/drives.rs.
+  it('recognises This PC followed by the drive letters it stands for', () => {
+    for (const value of ['This PC (C:, D:, E:)', 'this pc (d:)', ' THIS PC (C:,D:) ']) {
+      expect(isAllDrives(value), value).toBe(true);
+    }
   });
 
-  it('switching off puts back what was remembered', () => {
-    expect(toggleAllDrives(ALL_DRIVES_LABEL, 'D:/Work')).toEqual({ value: 'D:/Work', remembered: '' });
-  });
-
-  it('switching off with nothing remembered leaves the box empty', () => {
-    expect(toggleAllDrives('This PC', '')).toEqual({ value: '', remembered: '' });
-  });
-
-  it('switching on from an empty box remembers nothing', () => {
-    expect(toggleAllDrives('', '')).toEqual({ value: ALL_DRIVES_LABEL, remembered: '' });
+  it('does not take other text in the parentheses for drives', () => {
+    for (const value of ['This PC ()', 'This PC (C:\\Games)', 'This PC (C:, Games)', 'This PC (D:) extra']) {
+      expect(isAllDrives(value), value).toBe(false);
+    }
   });
 });

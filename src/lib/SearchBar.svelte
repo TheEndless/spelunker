@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { tick } from 'svelte';
-  import { pickFolder } from './backend';
+  import { onMount, tick } from 'svelte';
+  import { pickFolder, thisPcLabel } from './backend';
   import { countActiveFilters, type Criteria } from './criteria';
   import ExportMenu from './ExportMenu.svelte';
   import type { ExportFormat } from './exportResults';
@@ -8,11 +8,11 @@
   import FiltersPanel from './FiltersPanel.svelte';
   import { clearAllFilters, clearFilter, summarizeFilters, type FilterId } from './filterSummary';
   import FolderCombo from './FolderCombo.svelte';
-  import { ALL_DRIVES_LABEL, isAllDrives, toggleAllDrives } from './folderCombo';
+  import { ALL_DRIVES_LABEL } from './folderCombo';
   import Icon from './Icon.svelte';
   import type { Preferences } from './preferences.svelte';
   import SavedSearchesMenu from './SavedSearchesMenu.svelte';
-  import ShortcutsPopover from './ShortcutsPopover.svelte';
+  import ShortcutsDialog from './ShortcutsDialog.svelte';
   import { withShortcut } from './shortcuts';
   import ThemeMenu from './ThemeMenu.svelte';
   import type { SavedSearch } from './savedSearches';
@@ -60,21 +60,15 @@
     onOpenSettings,
   }: Props = $props();
 
-  /** Fixed choices at the top of the Look in list. The backend expands this to every local drive. */
-  const PLACES = [ALL_DRIVES_LABEL];
+  /** This PC with the letters of its drives, offered at the top of the Look in list. The backend expands it to those drives. */
+  let thisPc = $state(ALL_DRIVES_LABEL);
+  const places = $derived([thisPc]);
 
+  onMount(() => {
+    void thisPcLabel().then((label) => (thisPc = label));
+  });
 
   const criteria = $derived(preferences.criteria);
-
-  /** What Look in held before "all drives" was switched on, so switching it off puts it back. */
-  let folderBeforeAllDrives = '';
-  const allDrivesOn = $derived(isAllDrives(criteria.lookIn));
-
-  function switchAllDrives() {
-    const next = toggleAllDrives(criteria.lookIn, folderBeforeAllDrives);
-    criteria.lookIn = next.value;
-    folderBeforeAllDrives = next.remembered;
-  }
   const filterCount = $derived(countActiveFilters(criteria));
 
   const filterItems = $derived(summarizeFilters(criteria));
@@ -82,7 +76,7 @@
   let nameInput: HTMLInputElement;
   let textInput: HTMLInputElement;
   let lookInCombo: FolderCombo;
-  let shortcutsPopover: ShortcutsPopover;
+  let shortcutsDialog: ShortcutsDialog;
   let exportMenu: ExportMenu;
   let filtersToggle: HTMLButtonElement;
 
@@ -99,7 +93,7 @@
     lookInCombo.select();
   }
   export function showShortcuts() {
-    shortcutsPopover.show();
+    shortcutsDialog.show();
   }
   export function showExport() {
     exportMenu.show();
@@ -146,142 +140,118 @@
 
 <div class="top" role="search" aria-label="Search" data-pane="search">
 <header class="bar">
-  <!-- The two questions a search is made of, in reading order, and one lamp to switch on. -->
-  <div class="brief">
-    <section class="card where" aria-labelledby="where-heading">
-      <h2 class="eyebrow" id="where-heading">Where to look</h2>
-      <div class="group">
-        <label class="affix" id="lookin-label" for="lookin-input">Look in</label>
-        <FolderCombo
-          bind:this={lookInCombo}
-          bind:value={criteria.lookIn}
-          recents={preferences.recentFolders}
-          places={PLACES}
-          onRemoveRecent={removeRecentFolder}
-          onSubmit={() => {
-            if (!running && canSearch) onSearch();
-          }}
-          placeholder="Folder; another folder; or This PC"
-          inputId="lookin-input"
-          labelledby="lookin-label"
-          title={withShortcut('Look in', 'Ctrl+L')}
-        />
-        <button type="button" class="chip icon" aria-label="Browse for a folder" title="Browse for a folder" onclick={browse}>
-          <Icon name="folder" />
-        </button>
-        <button
-          type="button"
-          class="chip icon"
-          class:on={allDrivesOn}
-          aria-pressed={allDrivesOn}
-          aria-label="Search all drives"
-          title={allDrivesOn ? 'Searching every drive on this PC. Press to go back to your folders.' : 'Search every drive on this PC'}
-          onclick={switchAllDrives}
-        >
-          <Icon name="computer" />
-        </button>
-      </div>
-      <div class="switches" role="group" aria-label="Scope">
-        <label title="Look inside the folders below the chosen one"
-          ><input type="checkbox" bind:checked={criteria.subfolders} /> Subfolders</label
-        >
-        <label title="Files and folders marked hidden or system"
-          ><input type="checkbox" bind:checked={criteria.includeHidden} /> Hidden</label
-        >
-        <label title="Search inside folders reached through junctions and symbolic links. Loops are skipped and reported."
-          ><input type="checkbox" bind:checked={criteria.followLinks} /> Links</label
-        >
-      </div>
-    </section>
-
-    <section class="card what" aria-labelledby="what-heading">
-      <h2 class="eyebrow" id="what-heading">What to find</h2>
-      <div class="fields">
-        <div class="group name">
-          <label class="affix" for="name-input">{criteria.nameIsRegex ? 'Name regex' : 'Name'}</label>
-          <input
-            type="text"
-            id="name-input"
-            bind:this={nameInput}
-            bind:value={criteria.namePatterns}
-            onkeydown={submitOnEnter}
-            title={withShortcut('Name', 'Ctrl+N')}
-            placeholder={criteria.nameIsRegex ? String.raw`^invoice_\d+\.pdf$` : '*.log; *.txt; -*.min.js'}
-            aria-invalid={criteria.nameIsRegex && nameError !== null}
-            spellcheck="false"
-          />
+  <!-- One panel read top to bottom: where to look, what to find, then the extras. The lamp ends the first two rows. -->
+  <div class="panel">
+    <div class="rows">
+      <div class="row">
+        <h2 class="rail" id="where-heading">Where to look</h2>
+        <div class="body">
+          <div class="group lookin">
+            <label class="affix" id="lookin-label" for="lookin-input">Look in</label>
+            <FolderCombo
+              bind:this={lookInCombo}
+              bind:value={criteria.lookIn}
+              recents={preferences.recentFolders}
+              {places}
+              onRemoveRecent={removeRecentFolder}
+              onSubmit={() => {
+                if (!running && canSearch) onSearch();
+              }}
+              placeholder="Folder; another folder; or This PC"
+              inputId="lookin-input"
+              labelledby="lookin-label"
+              title={withShortcut('Look in', 'Ctrl+L')}
+            />
+            <button type="button" class="chip icon" aria-label="Browse for a folder" title="Browse for a folder, or choose This PC" onclick={browse}>
+              <Icon name="folder" />
+            </button>
+          </div>
+          <div class="switches" role="group" aria-labelledby="scope-label">
+            <span class="options-label" id="scope-label">Include</span>
+            <label class="option" title="Look inside the folders below the chosen one"
+              ><input type="checkbox" bind:checked={criteria.subfolders} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Subfolders</label
+            >
+            <label class="option" title="Files and folders marked hidden or system"
+              ><input type="checkbox" bind:checked={criteria.includeHidden} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Hidden</label
+            >
+            <label class="option" title="Search inside folders reached through junctions and symbolic links. Loops are skipped and reported."
+              ><input type="checkbox" bind:checked={criteria.followLinks} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Links</label
+            >
+            <label class="option" title="Also search inside binary files, not only text"
+              ><input type="checkbox" bind:checked={criteria.includeBinary} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Binary files</label
+            >
+          </div>
         </div>
-        <div class="group text">
-          <label class="affix" for="text-input">Containing</label>
-          <input
-            type="text"
-            id="text-input"
-            bind:this={textInput}
-            bind:value={criteria.text}
-            onkeydown={submitOnEnter}
-            title={withShortcut('Containing text', 'Ctrl+T or Ctrl+F')}
-            placeholder="Text to find"
-            aria-invalid={contentError !== null}
-            spellcheck="false"
-          />
-          <button
-            type="button"
-            class="chip"
-            class:on={criteria.matchCase}
-            aria-pressed={criteria.matchCase}
-            title="Match case"
-            onclick={() => (criteria.matchCase = !criteria.matchCase)}>Aa</button
-          >
-          <button
-            type="button"
-            class="chip"
-            class:on={criteria.wholeWord}
-            aria-pressed={criteria.wholeWord}
-            title="Whole word"
-            onclick={() => (criteria.wholeWord = !criteria.wholeWord)}>ab</button
-          >
-          <button
-            type="button"
-            class="chip mono"
-            class:on={criteria.regex}
-            aria-pressed={criteria.regex}
-            title="Regular expression"
-            onclick={() => (criteria.regex = !criteria.regex)}>.*</button
-          >
+      </div>
+
+      <div class="row">
+        <h2 class="rail" id="what-heading">What to find</h2>
+        <div class="body">
+          <div class="group name">
+            <label class="affix" for="name-input">{criteria.nameIsRegex ? 'Name regex' : 'Name'}</label>
+            <input
+              type="text"
+              id="name-input"
+              bind:this={nameInput}
+              bind:value={criteria.namePatterns}
+              onkeydown={submitOnEnter}
+              title={withShortcut('Name', 'Ctrl+N')}
+              placeholder={criteria.nameIsRegex ? String.raw`^invoice_\d+\.pdf$` : '*.log; *.txt; -*.min.js'}
+              aria-invalid={criteria.nameIsRegex && nameError !== null}
+              spellcheck="false"
+            />
+            <button
+              type="button"
+              class="chip mono"
+              class:on={criteria.nameIsRegex}
+              aria-pressed={criteria.nameIsRegex}
+              title="Name is a regular expression"
+              onclick={() => (criteria.nameIsRegex = !criteria.nameIsRegex)}>.*</button
+            >
+          </div>
+          <div class="group text">
+            <label class="affix" for="text-input">Containing</label>
+            <input
+              type="text"
+              id="text-input"
+              bind:this={textInput}
+              bind:value={criteria.text}
+              onkeydown={submitOnEnter}
+              title={withShortcut('Containing text', 'Ctrl+T or Ctrl+F')}
+              placeholder="Text to find"
+              aria-invalid={contentError !== null}
+              spellcheck="false"
+            />
+            <button
+              type="button"
+              class="chip"
+              class:on={criteria.matchCase}
+              aria-pressed={criteria.matchCase}
+              title="Match case"
+              onclick={() => (criteria.matchCase = !criteria.matchCase)}>Aa</button
+            >
+            <button
+              type="button"
+              class="chip"
+              class:on={criteria.wholeWord}
+              aria-pressed={criteria.wholeWord}
+              title="Whole word"
+              onclick={() => (criteria.wholeWord = !criteria.wholeWord)}>ab</button
+            >
+            <button
+              type="button"
+              class="chip mono"
+              class:on={criteria.regex}
+              aria-pressed={criteria.regex}
+              title="Text is a regular expression"
+              onclick={() => (criteria.regex = !criteria.regex)}>.*</button
+            >
+          </div>
         </div>
       </div>
       {#if criteria.nameIsRegex && nameError}<small class="problem" role="alert">{nameError}</small>{/if}
       {#if contentError}<small class="problem" role="alert">{contentError}</small>{/if}
-      <div class="switches">
-        <button
-          type="button"
-          class="tool"
-          bind:this={filtersToggle}
-          aria-expanded={preferences.filtersOpen}
-          aria-controls="filters-panel"
-          onclick={toggleFilters}
-        >
-          <Icon name="filter" />
-          Filters
-          {#if filterCount > 0}<span class="badge" aria-label="{filterCount} active">{filterCount}</span>{/if}
-          <Icon name={preferences.filtersOpen ? 'chevron-up' : 'chevron-down'} size={12} />
-        </button>
-        {#if filterItems.length > 0 && !preferences.filtersOpen}
-          <FilterChips items={filterItems} onRemove={removeFilter} onClearAll={removeAllFilters} />
-        {/if}
-        {#if failure}
-          <span class="problem" role="alert">{failure}</span>
-        {/if}
-        <label class="binary" title="Also search inside binary files, not only text"
-          ><input type="checkbox" bind:checked={criteria.includeBinary} /> Binary files</label
-        >
-      </div>
-      {#if preferences.filtersOpen}
-        <div id="filters-panel">
-          <FiltersPanel {criteria} />
-        </div>
-      {/if}
-    </section>
+    </div>
 
     <!-- One button for both, so keyboard focus stays on it when a search starts and ends. It uses
          aria-disabled (not disabled) so it keeps focus while a stop is in progress. -->
@@ -304,24 +274,52 @@
         <span>{running ? (stopping ? 'Stopping...' : 'Stop') : 'Search'}</span>
       </button>
     </div>
-  </div>
 
-  <!-- Things used between searches, not for every search, sit in the quiet corner. -->
-  <div class="tools">
-    <SavedSearchesMenu
-      searches={savedSearches}
-      notice={savedNotice}
-      onRecall={(search) => onRecallSearch(search.criteria)}
-      onSave={onSaveSearch}
-      onDelete={onDeleteSearch}
-    />
-    <ExportMenu bind:this={exportMenu} disabled={!canExport} {onExport} />
-    <span class="divider" aria-hidden="true"></span>
-    <button type="button" class="tool icon" aria-label="Settings" title={withShortcut('Settings', 'Ctrl+,')} onclick={onOpenSettings}>
-      <Icon name="settings" />
-    </button>
-    <ThemeMenu {preferences} />
-    <ShortcutsPopover bind:this={shortcutsPopover} />
+    <!-- The last row: Filters on the rail, what is active beside it, and the things used between searches at the end. -->
+    <div class="row extras">
+      <button
+        type="button"
+        class="tool rail-button"
+        bind:this={filtersToggle}
+        aria-expanded={preferences.filtersOpen}
+        aria-controls="filters-panel"
+        onclick={toggleFilters}
+      >
+        <Icon name="filter" />
+        Filters
+        {#if filterCount > 0}<span class="badge" aria-label="{filterCount} active">{filterCount}</span>{/if}
+        <Icon name={preferences.filtersOpen ? 'chevron-up' : 'chevron-down'} size={12} />
+      </button>
+      <div class="body">
+        {#if filterItems.length > 0 && !preferences.filtersOpen}
+          <FilterChips items={filterItems} onRemove={removeFilter} onClearAll={removeAllFilters} />
+        {/if}
+        {#if failure}
+          <span class="problem" role="alert">{failure}</span>
+        {/if}
+        <div class="tools">
+          <SavedSearchesMenu
+            searches={savedSearches}
+            notice={savedNotice}
+            onRecall={(search) => onRecallSearch(search.criteria)}
+            onSave={onSaveSearch}
+            onDelete={onDeleteSearch}
+          />
+          <ExportMenu bind:this={exportMenu} disabled={!canExport} {onExport} />
+          <span class="divider" aria-hidden="true"></span>
+          <button type="button" class="tool icon" aria-label="Settings" title={withShortcut('Settings', 'Ctrl+,')} onclick={onOpenSettings}>
+            <Icon name="settings" />
+          </button>
+          <ThemeMenu {preferences} />
+          <ShortcutsDialog bind:this={shortcutsDialog} />
+        </div>
+      </div>
+    </div>
+    {#if preferences.filtersOpen}
+      <div id="filters-panel" class="filters">
+        <FiltersPanel {criteria} activeCount={filterCount} onClearAll={removeAllFilters} />
+      </div>
+    {/if}
   </div>
 </header>
 
@@ -341,50 +339,90 @@
     padding: 8px 14px 10px;
   }
 
-  /* Cards keep their own height, so an open Filters panel grows only the card it belongs to. */
-  .brief {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
+  /* One raised panel. The rail down its left holds the row heads, the fields line up to its right,
+     and the lamp ends the first two rows. */
+  .panel {
+    --rail-width: 100px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 10px;
+    row-gap: 6px;
+    padding: 8px 10px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 6px;
   }
-
-  .card {
+  .rows {
     display: grid;
     gap: 6px;
     align-content: start;
     min-width: 0;
-    padding: 4px 10px 8px;
-    background: var(--surface-raised);
-    border: 1px solid var(--border);
-    border-radius: 8px;
   }
-  .where {
-    flex: 1 1 34%;
+  .row {
+    display: grid;
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    min-width: 0;
   }
-  .what {
-    flex: 1.8 1 52%;
-  }
-
-  .eyebrow {
+  .rail {
     display: flex;
     align-items: center;
-    height: 26px;
+    min-height: var(--control-height);
     margin: 0;
     font-size: var(--text-small);
     font-weight: 600;
     color: var(--text-muted);
+    white-space: nowrap;
   }
-
-  .fields {
+  .body {
     display: flex;
-    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
     min-width: 0;
   }
-  .fields .name {
-    flex: 1 1 36%;
+  .body .lookin {
+    flex: 1 1 280px;
   }
-  .fields .text {
-    flex: 1.6 1 64%;
+  .body .name {
+    flex: 1 1 200px;
+  }
+  .body .text {
+    flex: 1.6 1 280px;
+  }
+  .body .option {
+    flex: none;
+  }
+  .rows > .problem {
+    margin-left: calc(var(--rail-width) + 10px);
+  }
+  .extras {
+    /* The rail's width, unless the Filters button with its count is wider, and then the chips start after it. */
+    grid-template-columns: minmax(var(--rail-width), auto) minmax(0, 1fr);
+    grid-column: 1 / -1;
+    align-items: center;
+  }
+  /* The height of the other tools, and as wide as its words and the count when there is one. The rail
+     is wider than that, so the chips beside it are never crowded. */
+  .rail-button {
+    justify-self: start;
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .tools {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    margin-left: auto;
+  }
+  .divider {
+    width: 1px;
+    height: 18px;
+    background: var(--border);
+  }
+  .filters {
+    grid-column: 1 / -1;
   }
 
   /* A field group: a leading label, the box, and the toggles that belong to it, in one frame. */
@@ -408,13 +446,18 @@
   .group:has([aria-invalid='true']) {
     border-color: var(--danger);
   }
+  /* Look in and Name are stacked, so their labels are one width. A longer one, such as Name regex, widens its own. */
+  .lookin .affix,
+  .name .affix {
+    min-width: 58px;
+  }
   .affix {
     display: flex;
     align-items: center;
     flex: none;
     padding: 0 8px;
     border-right: 1px solid var(--border);
-    border-radius: 5px 0 0 5px;
+    border-radius: 3px 0 0 3px;
     background: var(--header-bg);
     color: var(--text-muted);
     font-size: var(--text-small);
@@ -450,7 +493,7 @@
     transition: color 120ms, background-color 120ms;
   }
   .chip:last-child {
-    border-radius: 0 5px 5px 0;
+    border-radius: 0 3px 3px 0;
   }
   .chip.icon {
     display: inline-grid;
@@ -471,48 +514,87 @@
   }
 
   .switches {
-    display: flex;
-    flex-wrap: wrap;
+    display: inline-flex;
+    flex: none;
     align-items: center;
-    gap: 4px 14px;
-    min-height: 24px;
+    gap: 2px;
+    min-height: var(--tool-height);
     color: var(--text-muted);
     font-size: var(--text-small);
   }
-  .switches label {
+  .options-label {
+    color: var(--text-muted);
+    font-size: var(--text-small);
+  }
+
+  /* A toggle that reads as one: a real checkbox kept under a chip, so the keyboard and screen readers see the same control. */
+  .option {
+    position: relative;
     display: inline-flex;
     gap: 6px;
     align-items: center;
+    height: var(--tool-height);
+    padding: 0 6px 0 3px;
+    border-radius: var(--radius);
+    color: var(--text-muted);
     white-space: nowrap;
     cursor: pointer;
+    transition: color 120ms;
   }
-  .switches label:hover {
+  .option input {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .mark {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    color: transparent;
+    transition: color 120ms, background-color 120ms, border-color 120ms;
+  }
+  .option:hover {
     color: var(--text);
   }
-  .switches .tool {
-    height: 24px;
+  .option:hover .mark {
+    border-color: var(--text-muted);
   }
-  .binary {
-    margin-left: auto;
+  .option:has(input:checked) {
+    color: var(--text);
   }
-
-  /* The lamp. It spans the two field rows so it is the largest and brightest thing on screen. */
+  .option:has(input:checked) .mark {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+  .option:has(input:focus-visible) {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 1px;
+  }
+  /* The lamp. It stands beside the first two rows, so it is the largest and brightest thing on screen. */
   .go-slot {
     display: flex;
-    flex: none;
-    align-items: flex-start;
-    padding-top: calc(4px + 26px + 6px);
+    grid-column: 2;
+    grid-row: 1;
   }
   .go {
     display: grid;
     place-items: center;
     align-content: center;
     gap: 4px;
-    width: 96px;
-    /* The field row plus the switches row, so the button spans both and no more. */
-    height: calc(var(--control-height) + 6px + 24px);
+    /* As wide as the three icon buttons under it (settings, appearance, help) and the gaps between them. */
+    width: calc(var(--tool-height) * 3 + 6px * 2);
+    /* As tall as the two rows beside it, and never shorter than they usually are. */
+    height: 100%;
+    min-height: calc(var(--control-height) * 2 + 6px);
     border: 0;
-    border-radius: 8px;
+    border-radius: 6px;
     background: var(--accent);
     color: var(--on-accent);
     font-weight: 600;
@@ -535,20 +617,6 @@
     color: var(--disabled-text);
   }
 
-  .tools {
-    position: absolute;
-    top: 12px;
-    right: 24px;
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .divider {
-    width: 1px;
-    height: 18px;
-    background: var(--border);
-  }
-
   .problem {
     color: var(--danger);
     font-weight: 600;
@@ -564,19 +632,6 @@
     font-size: var(--text-small);
     font-weight: 700;
     text-align: center;
-  }
-
-  /* Below about 1060 px the two What fields stack, so neither becomes too narrow to read. */
-  @media (max-width: 1060px) {
-    .fields {
-      flex-direction: column;
-      gap: 6px;
-    }
-    /* Stacked, each group keeps its full height instead of sharing the column. */
-    .fields .name,
-    .fields .text {
-      flex: none;
-    }
   }
 
   /* The beam: a lamp sweeping along the bottom edge while a search runs. */

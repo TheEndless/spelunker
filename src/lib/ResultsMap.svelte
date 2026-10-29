@@ -15,7 +15,6 @@
 
 <script lang="ts">
   import { onDestroy, onMount, untrack } from 'svelte';
-  import { bestTextOn } from './colors';
   import { formatSize } from './format';
   import Icon from './Icon.svelte';
   import { effectiveFilter, fileTooltip, groupTooltip, legendEntries, summaryText, zoomButton, type TooltipText } from './mapText';
@@ -70,10 +69,10 @@
 
   const ANNOUNCE_DELAY_MS = 250;
   /** The hover outline: a light line with a dark line inside it. Selection uses a thicker pair. */
-  const HOVER_LIGHT_WIDTH = 2;
+  const HOVER_LIGHT_WIDTH = 1;
   const HOVER_DARK_WIDTH = 1;
-  const SELECTED_LIGHT_WIDTH = 3;
-  const SELECTED_DARK_WIDTH = 2;
+  const SELECTED_LIGHT_WIDTH = 2;
+  const SELECTED_DARK_WIDTH = 1;
   const FRAME_DASH = [4, 4];
   const NO_DASH: number[] = [];
   const NOTHING_DIMMED: ReadonlySet<number> = new Set();
@@ -87,7 +86,6 @@
   let stageWidth = $state(0);
   let stageHeight = $state(0);
   let pixelRatio = $state(window.devicePixelRatio || 1);
-  let font = $state('12px sans-serif');
 
   // ---- colors
 
@@ -154,7 +152,6 @@
     // The base canvas goes to the worker before anything sizes it: once transferred, only the worker can.
     client.attach(baseCanvas);
     attached = true;
-    font = `12px ${getComputedStyle(document.body).fontFamily}`;
 
     const resizeObserver = new ResizeObserver(() => {
       stageWidth = Math.floor(stage.clientWidth);
@@ -201,7 +198,6 @@
       colorMode,
       colors,
       forced,
-      font,
       dimmed: shownKey === '' ? null : shownKey.split(',').map(Number),
       shading,
     };
@@ -226,9 +222,9 @@
     const context = baseCanvas.getContext('2d');
     if (!context) return;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-    const style: PaintStyle = { colors, colorMode, forced, font, labelColorFor: bestTextOn, pixelRatio, shading };
+    const style: PaintStyle = { colors, colorMode, forced, pixelRatio, shading };
     const dimmed = shownBuckets.size > 0 ? shownBuckets : null;
-    paintMap(context, current, width, height, style, dimmed, (rect) => session.rowById(current.id[rect])?.name ?? '');
+    paintMap(context, current, width, height, style, dimmed);
   });
 
   // ---- selection
@@ -407,12 +403,13 @@
   ) {
     let { x, y, w, h } = snappedBox(current.x[rect], current.y[rect], current.w[rect], current.h[rect], ratio);
     const total = lightWidth + darkWidth;
-    // Too small to hold the outline inside, so it goes around the rectangle instead.
+    // Too small to hold the outline inside, so it goes around the rectangle instead, kept within
+    // the stage so a sliver at an edge shows a whole outline and not the part that was clipped.
     if (w < 2 * total + 2 || h < 2 * total + 2) {
-      x -= total;
-      y -= total;
       w += 2 * total;
       h += 2 * total;
+      x = Math.max(0, Math.min(x - total, stageWidth - w));
+      y = Math.max(0, Math.min(y - total, stageHeight - h));
     }
     context.lineWidth = lightWidth;
     context.strokeStyle = light;
@@ -516,6 +513,20 @@
       return;
     }
     const row = rowOfRect(rect);
+    if (row) onSelect(row);
+    else void selectWithin(rect);
+  }
+
+  /**
+   * A group or block stands for many files, none of them drawn. Clicking it selects the heaviest of
+   * them, so the list follows the click and the selection outline lands on the group or block.
+   */
+  async function selectWithin(rect: number) {
+    const current = client.layout;
+    if (!current || rect < 0 || rect >= current.count) return;
+    const wholeFolder = current.kind[rect] === RectKind.FolderBlock;
+    const fileId = await client.representativeOf(current.id[rect], wholeFolder);
+    const row = fileId >= 0 ? session.rowById(fileId) : undefined;
     if (row) onSelect(row);
     else setHover(rect);
   }
@@ -631,12 +642,13 @@
   }
 
   const metricOptions = $derived([
-    { value: 'size' as Metric, label: 'Size', disabled: false },
-    { value: 'matches' as Metric, label: 'Matches', disabled: !canUseMatches },
+    { value: 'size' as Metric, label: 'File size', hint: 'Each tile is as big as its file', disabled: false },
+    { value: 'matches' as Metric, label: 'Matches', hint: 'Each tile is as big as its number of matching lines', disabled: !canUseMatches },
   ]);
-  const colorOptions: { value: ColorMode; label: string; disabled: boolean }[] = [
-    { value: 'type', label: 'File type', disabled: false },
-    { value: 'age', label: 'Age', disabled: false },
+  const colorOptions: { value: ColorMode; label: string; hint: string; disabled: boolean }[] = [
+    { value: 'type', label: 'File type', hint: 'Color tiles by kind of file: code, images, archives, and so on', disabled: false },
+    { value: 'age', label: 'Age', hint: 'Color tiles by when the file was last changed', disabled: false },
+    { value: 'size', label: 'File size', hint: 'Color tiles by how big the file is, from the smallest to the largest class in the legend', disabled: false },
   ];
 
   // ---- public
@@ -675,7 +687,8 @@
 
 <section class="map" data-pane="map" aria-label="Results map">
   <div class="toolbar">
-    <div class="modes" role="radiogroup" aria-label="Area">
+    <span class="mode-label" id="map-area-label">Tile area</span>
+    <div class="modes" role="radiogroup" aria-labelledby="map-area-label">
       {#each metricOptions as option (option.value)}
         <button
           type="button"
@@ -684,13 +697,14 @@
           aria-checked={metric === option.value}
           tabindex={metric === option.value ? 0 : -1}
           disabled={option.disabled}
-          title={option.disabled ? 'Matches needs Containing text' : undefined}
+          title={option.disabled ? 'Matches needs Containing text' : option.hint}
           onclick={() => onMetric(option.value)}
           onkeydown={(event) => onRadioKeydown(event, metricOptions, metric, onMetric)}>{option.label}</button
         >
       {/each}
     </div>
-    <div class="modes" role="radiogroup" aria-label="Color">
+    <span class="mode-label" id="map-color-label">Color by</span>
+    <div class="modes" role="radiogroup" aria-labelledby="map-color-label">
       {#each colorOptions as option (option.value)}
         <button
           type="button"
@@ -698,6 +712,7 @@
           class:on={colorMode === option.value}
           aria-checked={colorMode === option.value}
           tabindex={colorMode === option.value ? 0 : -1}
+          title={option.hint}
           onclick={() => onColorMode(option.value)}
           onkeydown={(event) => onRadioKeydown(event, colorOptions, colorMode, onColorMode)}>{option.label}</button
         >
@@ -809,6 +824,13 @@
     background: var(--header-bg);
     border-bottom: 1px solid var(--border);
     min-width: 0;
+  }
+  .mode-label {
+    flex: none;
+    margin-right: -3px;
+    color: var(--text-muted);
+    font-size: var(--text-small);
+    white-space: nowrap;
   }
   .modes {
     display: inline-flex;

@@ -13,15 +13,15 @@ describe('countActiveFilters', () => {
     criteria.size.mode = 'larger';
     criteria.modified.mode = 'within';
     criteria.created.mode = 'before';
-    criteria.nameIsRegex = true;
     criteria.multiLine = true;
-    expect(countActiveFilters(criteria)).toBe(5);
+    expect(countActiveFilters(criteria)).toBe(4);
   });
 
   it('does not count ordinary search options as filters', () => {
     const criteria = fresh();
     criteria.matchCase = true;
     criteria.includeHidden = true;
+    criteria.nameIsRegex = true;
     criteria.regex = true;
     expect(countActiveFilters(criteria)).toBe(0);
   });

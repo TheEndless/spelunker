@@ -37,6 +37,16 @@ fn split_words(template: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
+/// The command line of a built-in editor, by the id the page sends. The text of these never comes
+/// from the page.
+pub fn built_in_template(editor: &str) -> Option<&'static str> {
+    match editor {
+        "vscode" => Some(r#"code.cmd -g "{path}:{line}""#),
+        "notepadpp" => Some(r#"notepad++ -n{line} "{path}""#),
+        _ => None,
+    }
+}
+
 /// The program and arguments for `template`, with `{path}` and `{line}` filled in.
 pub fn build_command(
     template: &str,
@@ -155,6 +165,67 @@ pub fn open_in_editor(template: &str, path: &str, line: u64) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `path` through a real `.cmd` editor that writes its first argument to a file, and
+    /// returns what it wrote, without the quotes it arrived in. The editor echoes the argument
+    /// still quoted, as a careful wrapper does, so only what the app passed is being tested.
+    #[cfg(windows)]
+    fn through_a_batch_editor(path: &str) -> String {
+        let folder = tempfile::tempdir().unwrap();
+        let output = folder.path().join("out.txt");
+        let editor = folder.path().join("editor.cmd");
+        std::fs::write(
+            &editor,
+            format!("@echo off\r\n>\"{}\" echo %1\r\n", output.display()),
+        )
+        .unwrap();
+        let template = format!("\"{}\" {{path}}", editor.display());
+        open_in_editor(&template, path, 1).unwrap();
+        for _ in 0..100 {
+            if let Ok(text) = std::fs::read_to_string(&output) {
+                if text.ends_with('\n') {
+                    return text
+                        .trim_end_matches(['\r', '\n'])
+                        .trim_matches('"')
+                        .to_string();
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("the editor wrote nothing for {path}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_batch_editor_receives_a_file_name_with_shell_characters_unchanged() {
+        for name in [
+            r"C:\x\a & calc.exe",
+            r"C:\x\a && echo hi.txt",
+            r"C:\x\a | more.txt",
+            r"C:\x\a ^ b.txt",
+            r"C:\x\a ( b ) c.txt",
+            r"C:\x\100% sure.txt",
+            r"C:\x\%COMSPEC%.txt",
+            r"C:\x\%PATH%.txt",
+            r"C:\x\!x!.txt",
+        ] {
+            assert_eq!(through_a_batch_editor(name), name, "{name}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_editors_have_their_command_lines_here() {
+        assert_eq!(
+            built_in_template("vscode"),
+            Some(r#"code.cmd -g "{path}:{line}""#)
+        );
+        assert_eq!(
+            built_in_template("notepadpp"),
+            Some(r#"notepad++ -n{line} "{path}""#)
+        );
+        assert_eq!(built_in_template("custom"), None);
+        assert_eq!(built_in_template("calc.exe"), None);
+    }
 
     #[test]
     fn placeholders_are_filled_in() {

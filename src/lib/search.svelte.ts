@@ -38,6 +38,8 @@ export class SearchSession {
   /** True once stopping has taken long enough to deserve an on-screen explanation. */
   stoppingNoticeVisible = $state(false);
   filesScanned = $state(0);
+  /** The folder the walk was in at the latest progress report. Empty when no search is running. */
+  currentFolder = $state('');
   elapsedMs = $state(0);
   summary = $state.raw<Summary | null>(null);
   /** Set when the search could not start, for example an invalid regex. */
@@ -82,6 +84,7 @@ export class SearchSession {
     for (const listener of this.listeners) listener.reset(Date.now());
     this.errors = [];
     this.filesScanned = 0;
+    this.currentFolder = '';
     this.elapsedMs = 0;
     this.summary = null;
     this.failure = null;
@@ -171,11 +174,13 @@ export class SearchSession {
       }
       if (message.errors.length > 0) this.errors = this.errors.concat(message.errors);
       if (message.filesScanned !== null) this.filesScanned = message.filesScanned;
+      if (message.folder !== null) this.currentFolder = message.folder;
       return;
     }
     clearInterval(this.timer);
     this.clearStopping();
     this.running = false;
+    this.currentFolder = '';
     this.failure = message.error;
     if (message.summary) {
       this.summary = message.summary;

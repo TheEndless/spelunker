@@ -275,17 +275,21 @@ async function chooseTheme(label) {
 }
 
 async function radio(group, label) {
-  await ev(`[...document.querySelectorAll('.map [role=radiogroup][aria-label=${group}] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`);
+  await ev(`[...document.querySelectorAll('.map [role=radiogroup]${RADIO_GROUPS[group]} button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click()`);
   await waitForSettledMap();
 }
 
+/** The map toolbar's two radio groups, named by the labels beside them. */
+const RADIO_GROUPS = { Area: '[aria-labelledby="map-area-label"]', Color: '[aria-labelledby="map-color-label"]' };
 const radioState = (group, label) =>
-  ev(`(() => { const button = [...document.querySelectorAll('.map [role=radiogroup][aria-label=${group}] button')].find((candidate) => candidate.textContent.trim() === ${JSON.stringify(label)}); return { checked: button.getAttribute('aria-checked') === 'true', disabled: button.disabled }; })()`);
+  ev(`(() => { const button = [...document.querySelectorAll('.map [role=radiogroup]${RADIO_GROUPS[group]} button')].find((candidate) => candidate.textContent.trim() === ${JSON.stringify(label)}); return { checked: button.getAttribute('aria-checked') === 'true', disabled: button.disabled }; })()`);
 
-/** Runs `inDialog` with the Settings dialog open, then closes it with Escape. */
+/** Runs `inDialog` with the Settings dialog open on its Appearance tab, where the map shading is, then closes it with Escape. */
 async function withSettings(inDialog) {
   await ev(`document.querySelector('button[aria-label="Settings"]').click()`);
   await sleep(300);
+  await ev(`document.getElementById('settings-tab-appearance').click()`);
+  await sleep(150);
   const result = await inDialog();
   await key('Escape');
   await sleep(200);
@@ -317,7 +321,7 @@ async function browserChecks() {
 
   // ---- 19. the map shading setting (the rest runs after check 15)
   const firstShading = await shadingInSettings();
-  check('19. Settings has a Map shading choice, and Cushion is the default', firstShading.group === 'Map shading' && firstShading.checked === 'Cushion', firstShading);
+  check('19. Settings has a Map shading choice, and Facet is the default', firstShading.group === 'Map shading' && firstShading.checked === 'Facet', firstShading);
 
   // ---- 1. the map draws
   await search('many');
@@ -336,7 +340,7 @@ async function browserChecks() {
   const matchesSample = await sampleBase();
   check('3. switching to Matches changes the summary', byMatches.summary !== first.summary && /match/.test(byMatches.summary ?? ''), { before: first.summary, after: byMatches.summary });
   check('3. and the picture (both samples drawn)', firstSample?.opaque === 200 && matchesSample?.opaque === 200 && matchesSample.signature !== firstSample.signature, { before: firstSample?.opaque, after: matchesSample?.opaque });
-  await radio('Area', 'Size');
+  await radio('Area', 'File size');
 
   // ---- 4. File type to Age changes the colors and the legend
   const typeSample = await sampleBase();
@@ -477,9 +481,10 @@ async function browserChecks() {
   check('12. the height persists across a reload', storedHeight === chosen.panelHeight && reloaded.panelHeight === chosen.panelHeight, { chosen: chosen.panelHeight, storedHeight, reloaded: reloaded.panelHeight });
 
   // ---- 13. the shortest window
-  await resizeTo(1000, 520);
+  // The window cannot be made shorter than 520, where the search panel now leaves the map room (340 px), so a shorter page stands in for a taller panel.
+  await resizeTo(1000, 470);
   const short = await state();
-  check('13. at 1000 by 520 the map collapses on its own', !short.shown, short);
+  check('13. at 1000 by 470 the map collapses on its own', !short.shown, short);
   const tooShortReason = 'The window is too short for the map';
   check('13. the status bar button is marked unavailable, not pressed, and says why', short.toggle?.ariaDisabled === 'true' && short.toggle.pressed === 'false' && short.toggle.title === tooShortReason && short.toggle.description === tooShortReason, short.toggle);
   await ev(`document.querySelector('.map-toggle').focus()`);
@@ -498,7 +503,7 @@ async function browserChecks() {
   // ---- 14. forced colors, with each map shading
   const forcedSamples = {};
   for (const shading of ['Cushion', 'Flat']) {
-    if (shading !== 'Cushion') await chooseShading(shading);
+    await chooseShading(shading);
     const normalSample = await sampleBase();
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await waitForSettledMap();
@@ -531,8 +536,8 @@ async function browserChecks() {
   await radio('Area', 'Matches');
   await search('');
   const nameOnly = await radioState('Area', 'Matches');
-  check('2. Matches is disabled for a name-only search (no Containing text)', nameOnly.disabled && (await radioState('Area', 'Size')).checked, nameOnly);
-  await radio('Area', 'Size');
+  check('2. Matches is disabled for a name-only search (no Containing text)', nameOnly.disabled && (await radioState('Area', 'File size')).checked, nameOnly);
+  await radio('Area', 'File size');
 
   // ---- 16. performance on the deep fixture
   await performanceChecks();
@@ -782,7 +787,7 @@ async function performanceChecks() {
   const settled = await ev('window.__spMapProbe.timings()');
   // More layouts of the same settled rows, to see the spread.
   const relayouts = [];
-  for (const [group, label] of [['Area', 'Matches'], ['Area', 'Size'], ['Color', 'Age'], ['Color', 'File type']]) {
+  for (const [group, label] of [['Area', 'Matches'], ['Area', 'File size'], ['Color', 'Age'], ['Color', 'File type']]) {
     await radio(group, label);
     relayouts.push({ view: `${group} ${label}`, ...(await ev('window.__spMapProbe.timings()')) });
   }

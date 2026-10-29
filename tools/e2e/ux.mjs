@@ -2,12 +2,12 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { PAGE_HELPERS } from './cdp.mjs';
 import { createChecker } from './page.mjs';
+import { findSpelunkerPage } from './target.mjs';
 
 const outDir = process.argv[2];
 mkdirSync(outDir, { recursive: true });
 
-const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
-const page = targets.find((target) => target.type === 'page');
+const page = await findSpelunkerPage();
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve) => (socket.onopen = resolve));
 let nextId = 1;
@@ -68,7 +68,7 @@ const setField = (selector, value) =>
 // ---------- first run: empty state, tooltips, wording
 const idle = await ev(`({ title: document.querySelector('.empty strong')?.innerText, text: document.querySelector('.empty')?.innerText, headers: [...document.querySelectorAll('.head button')].map(b => b.innerText.trim()), searchTitle: [...document.querySelectorAll('button.go')].map(b => b.title), nameTitle: document.querySelector('input[placeholder*="log"]')?.title, textTitle: document.querySelector('input[placeholder="Text to find"]')?.title, lookTitle: document.querySelector('[role=combobox]')?.title, landmarks: { search: !!document.querySelector('[role=search]'), main: !!document.querySelector('main'), results: !!document.querySelector('section[aria-label=Results]'), preview: !!document.querySelector('aside[aria-label=Preview]') } })`);
 check('empty state guides a first-time user', idle.title === 'Find files' && /Look in/.test(idle.text), idle);
-check('column says Matches, not Hits', idle.headers.includes('Matches') && !idle.headers.includes('Hits'), idle.headers);
+check('Matches is hidden by default, and no column says Hits', !idle.headers.includes('Matches') && !idle.headers.includes('Hits'), idle.headers);
 check('tooltips show shortcuts', /Ctrl\+N/.test(idle.nameTitle) && /Ctrl\+T/.test(idle.textTitle) && /Ctrl\+L/.test(idle.lookTitle) && idle.searchTitle.some((t) => /Enter/.test(t)), idle);
 check('landmarks exist (search, main, results, preview)', Object.values(idle.landmarks).every(Boolean), idle.landmarks);
 
@@ -99,7 +99,7 @@ check('status bar says what was found', /\d+ matches? in \d+ files?|files? match
 await ev(`document.querySelectorAll('.body .row')[2].click()`);
 await sleep(300);
 const grid = await ev(`(() => { const g = document.querySelector('[role=grid]'); const rows = [...document.querySelectorAll('.body .row')]; const selected = rows.filter(r => r.getAttribute('aria-selected') === 'true'); return { rowcount: g.getAttribute('aria-rowcount'), colcount: g.getAttribute('aria-colcount'), active: g.getAttribute('aria-activedescendant'), rowsRendered: rows.length, selectedCount: selected.length, selectedId: selected[0]?.id, selectedIndexAttr: selected[0]?.getAttribute('aria-rowindex'), headerIndex: document.querySelector('.header').getAttribute('aria-rowindex'), firstRowIndexAttr: rows[0].getAttribute('aria-rowindex'), cellIndex: rows[0].querySelector('.cell').getAttribute('aria-colindex') }; })()`);
-check('grid exposes selection and position', grid.active === grid.selectedId && grid.selectedCount === 1 && grid.selectedIndexAttr === '4' && grid.headerIndex === '1' && grid.firstRowIndexAttr === '2' && grid.rowcount === String(grid.rowsRendered + 1) && grid.colcount === '6' && grid.cellIndex === '1', grid);
+check('grid exposes selection and position', grid.active === grid.selectedId && grid.selectedCount === 1 && grid.selectedIndexAttr === '4' && grid.headerIndex === '1' && grid.firstRowIndexAttr === '2' && grid.rowcount === String(grid.rowsRendered + 1) && grid.colcount === '5' && grid.cellIndex === '1', grid);
 
 // ---------- grid keyboard
 await ev(`document.querySelector('[role=grid]').focus()`);

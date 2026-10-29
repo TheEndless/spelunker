@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ADD_CHUNK_SIZE, TreemapClient, type WorkerLike } from './treemapClient.svelte';
+import { ADD_CHUNK_SIZE, LAYOUT_INTERVAL_MS, TreemapClient, type WorkerLike } from './treemapClient.svelte';
 import type { SessionListener } from './search.svelte';
+import { handleMessage } from './treemap.worker';
+import type { ToWorker } from './treemapMessages';
 import type { DisplayRow } from './types';
 
 const row = (id: number, folder = 'C:\\a'): DisplayRow => ({
@@ -9,7 +11,7 @@ const row = (id: number, folder = 'C:\\a'): DisplayRow => ({
 
 const view = (width = 100) => ({
   width, height: 100, devicePixelRatio: 1, metric: 'size' as const, colorMode: 'type' as const,
-  colors: {} as never, forced: null, font: '', dimmed: null, shading: 'cushion' as const,
+  colors: {} as never, forced: null, dimmed: null, shading: 'cushion' as const,
 });
 
 const layoutReply = (sequence: number) => ({
@@ -348,6 +350,19 @@ describe('TreemapClient', () => {
     await expect(pending).resolves.toEqual({ rect: 3, zoomFolderId: null });
   });
 
+  it('resolves representativeOf from the worker answer, and to -1 for any other reply', async () => {
+    const { client, worker, posted, canvas } = setup();
+    client.attach(canvas);
+    const pending = client.representativeOf(4, true);
+    const request = posted.map((entry) => entry.message).find((message) => message.type === 'representative');
+    expect(request).toMatchObject({ folderId: 4, wholeFolder: true });
+    worker.onmessage!({ data: { type: 'representativeFile', requestId: request.requestId, fileId: 9 } } as MessageEvent);
+    await expect(pending).resolves.toBe(9);
+    const unanswered = client.representativeOf(4, false);
+    client.dispose();
+    await expect(unanswered).resolves.toBe(-1);
+  });
+
   it('answers waiting locate and describe questions with nothing when disposed', async () => {
     const { client, canvas } = setup();
     client.attach(canvas);
@@ -412,5 +427,48 @@ describe('TreemapClient', () => {
     client.attach(canvas);
     client.dispose();
     expect(worker.terminate).toHaveBeenCalled();
+  });
+});
+
+describe('TreemapClient with the real worker logic', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  /** A client wired straight to the worker's message handler, so a reply goes back as it would from a worker. */
+  function connected() {
+    const worker: WorkerLike = {
+      postMessage: (message) => {
+        // A worker answers later, never inside the call that asked, and the client relies on that.
+        handleMessage(message as ToWorker, (reply) => void Promise.resolve().then(() => worker.onmessage!({ data: reply } as MessageEvent)));
+      },
+      onmessage: null, onerror: null, onmessageerror: null, terminate: vi.fn(),
+    };
+    let listener!: SessionListener;
+    const session = { rows: [] as DisplayRow[], running: true, subscribe: (next: SessionListener) => ((listener = next), () => {}) };
+    const client = new TreemapClient(session as never, () => worker);
+    const canvas = { transferControlToOffscreen: () => ({ getContext: () => null, width: 0, height: 0 }) } as unknown as HTMLCanvasElement;
+    client.setView(view());
+    client.attach(canvas);
+    return { client, listener: () => listener };
+  }
+
+  const fileIds = (client: TreemapClient) =>
+    Array.from({ length: client.layout!.count }, (_, i) => client.layout!.id[i]).filter((_, i) => client.layout!.kind[i] === 0);
+
+  it('keeps showing everything found while it streams in, and not the folder the first results were in', async () => {
+    const { client, listener } = connected();
+    listener().reset(0);
+    listener().appended([row(1, 'C:\\work\\a\\deep'), row(2, 'C:\\work\\a\\deep')]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fileIds(client)).toEqual(expect.arrayContaining([1, 2]));
+    // With only these results, the top of the map is the deep folder they share.
+    expect(client.crumbs).toHaveLength(1);
+    expect(client.crumbs[0].label).toBe('C:\\work\\a\\deep');
+
+    listener().appended([row(3, 'C:\\other')]);
+    // The client lays out again on its next tick.
+    await vi.advanceTimersByTimeAsync(LAYOUT_INTERVAL_MS + 100);
+    expect(fileIds(client)).toEqual(expect.arrayContaining([1, 2, 3]));
+    expect(client.crumbs).toHaveLength(1);
   });
 });

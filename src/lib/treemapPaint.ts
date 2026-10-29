@@ -1,23 +1,29 @@
 // The worker paints with this module too. textFit only touches the document in canvasMeasurer,
 // which is not used here, so it is safe to load in a worker.
 import { channels } from './colors';
-import { fitMiddle } from './textFit';
-import { labelColorOn, type ForcedColors, type MapColors } from './treemapColors';
-import { brightnessAt, brightnessOfNormal, shadeChannel, surfaceNormal } from './treemapCushion';
+import type { ForcedColors, MapColors } from './treemapColors';
+import { brightnessOfNormal, shadeChannel, surfaceNormal } from './treemapCushion';
 import { RectKind, type Layout } from './treemapLayout';
 
 export type Context2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-export type ColorMode = 'type' | 'age';
-export type Shading = 'cushion' | 'flat';
+export type ColorMode = 'type' | 'age' | 'size';
+
+/** The bucket each rectangle falls in under a color mode. */
+export function colorBuckets(layout: Layout, mode: ColorMode): Uint8Array {
+  return mode === 'type' ? layout.category : mode === 'age' ? layout.age : layout.sizeClass;
+}
+
+/** The fill of each bucket under a color mode. */
+export function colorFills(colors: MapColors, mode: ColorMode): string[] {
+  return mode === 'type' ? colors.category : mode === 'age' ? colors.age : colors.size;
+}
+export type Shading = 'cushion' | 'facet' | 'flat';
 
 export interface PaintStyle {
   colors: MapColors;
   colorMode: ColorMode;
   /** Set under forced-colors mode: no fills, only outlines in system colors. */
   forced: ForcedColors | null;
-  font: string;
-  /** The label color on a flat fill. Cushion labels are judged on the shaded row instead. */
-  labelColorFor: (fill: string) => string;
   /** Device pixels per CSS pixel, so edges can be put on whole device pixels. */
   pixelRatio: number;
   /** Cushion lights every tile per pixel, flat fills each with one color. Forced colors ignores it. */
@@ -37,26 +43,7 @@ function snappedExtent(start: number, size: number, pixelRatio: number): number 
   return Math.max(snapToDevicePixel(start + size, pixelRatio) - snapToDevicePixel(start, pixelRatio), 1 / pixelRatio);
 }
 
-const MIN_LABEL_WIDTH = 64;
-const MIN_LABEL_HEIGHT = 16;
-/** Where a label's text starts, and the middle of its line, from the rectangle's top-left corner. */
-const LABEL_LEFT = 4;
-const LABEL_MIDDLE = 9;
 const DIMMED_ALPHA = 0.18;
-
-/** The label for a file rectangle big enough to hold one, cut in the middle to fit, or '' for none. */
-function fittedLabel(
-  layout: Layout,
-  rect: number,
-  rectWidth: number,
-  rectHeight: number,
-  nameOf: (rect: number) => string,
-  measure: (text: string) => number,
-): string {
-  if (layout.kind[rect] !== RectKind.File || rectWidth < MIN_LABEL_WIDTH || rectHeight < MIN_LABEL_HEIGHT) return '';
-  // The list's own middle cut, which keeps the extension and never splits a character.
-  return fitMiddle(nameOf(rect), rectWidth - 2 * LABEL_LEFT, measure);
-}
 
 /**
  * Paints with cushion lighting or flat fills by `style.shading`. Forced colors always gets the
@@ -70,13 +57,12 @@ export function paintMap(
   height: number,
   style: PaintStyle,
   dimmed: ReadonlySet<number> | null,
-  nameOf: ((rect: number) => string) | null,
 ): void {
   if (style.forced || style.shading === 'flat') {
     releaseCushionImage();
-    paintLayout(context, layout, width, height, style, dimmed, nameOf);
+    paintLayout(context, layout, width, height, style, dimmed);
   } else {
-    paintCushion(context, layout, width, height, style, dimmed, nameOf);
+    paintCushion(context, layout, width, height, style, dimmed);
   }
 }
 
@@ -87,18 +73,15 @@ export function paintLayout(
   height: number,
   style: PaintStyle,
   dimmed: ReadonlySet<number> | null,
-  nameOf: ((rect: number) => string) | null,
 ): void {
   const { colors, colorMode, forced, pixelRatio } = style;
+  const fills = colorFills(colors, colorMode);
+  const buckets = colorBuckets(layout, colorMode);
   // About one CSS pixel between neighbours, in whole device pixels.
   const seam = Math.max(1, Math.round(pixelRatio)) / pixelRatio;
   context.globalAlpha = 1;
   context.fillStyle = forced ? forced.canvas : colors.background;
   context.fillRect(0, 0, width, height);
-
-  context.font = style.font;
-  context.textBaseline = 'middle';
-  const measure = (text: string) => context.measureText(text).width;
 
   for (let i = 0; i < layout.count; i++) {
     if (layout.w[i] < 0.5 || layout.h[i] < 0.5) continue;
@@ -118,28 +101,39 @@ export function paintLayout(
       continue;
     }
 
-    const bucket = colorMode === 'type' ? layout.category[i] : layout.age[i];
-    const fill = colorMode === 'type' ? colors.category[bucket] : colors.age[bucket];
+    const bucket = buckets[i];
+    const fill = fills[bucket];
     const isDimmed = dimmed !== null && !dimmed.has(bucket);
     context.globalAlpha = isDimmed ? DIMMED_ALPHA : 1;
     context.fillStyle = fill;
     // A seam on the right and bottom keeps neighbouring files apart without drawing outlines.
     const gap = rectWidth >= 2 && rectHeight >= 2 ? seam : 0;
     context.fillRect(rectX, rectY, rectWidth - gap, rectHeight - gap);
-
-    if (nameOf && !isDimmed) {
-      const label = fittedLabel(layout, i, rectWidth, rectHeight, nameOf, measure);
-      if (label !== '') {
-        context.fillStyle = style.labelColorFor(fill);
-        context.fillText(label, rectX + LABEL_LEFT, rectY + LABEL_MIDDLE);
-      }
-    }
   }
   context.globalAlpha = 1;
 }
 
 /** Whether a Uint32 write lays its low byte first, which the packed-pixel writes below rely on. */
 const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+/** Facet shading: each tile is a gentle slope from light at the top left to darker at the bottom right, with a lit top and left edge and a shadowed bottom and right edge. */
+const FACET_LIGHT = 1.04;
+const FACET_DARK = 0.74;
+const FACET_LIT_EDGE = 0.18;
+const FACET_SHADOWED_EDGE = 0.22;
+/** A tile needs this many device pixels each way to get edges, and a smaller one only gets the slope. */
+const FACET_MIN_EDGE_SPAN = 5;
+
+function facetBrightness(column: number, row: number, left: number, top: number, right: number, bottom: number): number {
+  const across = (column + 0.5 - left) / (right - left);
+  const down = (row + 0.5 - top) / (bottom - top);
+  let brightness = FACET_LIGHT + (FACET_DARK - FACET_LIGHT) * ((across + down) / 2);
+  if (right - left >= FACET_MIN_EDGE_SPAN && bottom - top >= FACET_MIN_EDGE_SPAN) {
+    if (column === left || row === top) brightness += FACET_LIT_EDGE;
+    else if (column === right - 1 || row === bottom - 1) brightness -= FACET_SHADOWED_EDGE;
+  }
+  return brightness;
+}
 
 /** The image the cushion painter fills, kept while the backing size is unchanged so a repaint allocates nothing. */
 let cushionImage: ImageData | null = null;
@@ -184,8 +178,8 @@ function writePixel(pixels: Uint32Array, bytes: Uint8ClampedArray, index: number
 
 /**
  * Paints the layout with cushion lighting into `context` at `style.pixelRatio`. Works in whole device
- * pixels with one reused ImageData (the context's transform and globalAlpha do not apply to putImageData),
- * then draws labels with the transform. `dimmed` and `nameOf` behave as in paintLayout.
+ * pixels with one reused ImageData (the context's transform and globalAlpha do not apply to putImageData).
+ * `dimmed` behaves as in paintLayout.
  */
 export function paintCushion(
   context: Context2D,
@@ -194,7 +188,6 @@ export function paintCushion(
   height: number,
   style: PaintStyle,
   dimmed: ReadonlySet<number> | null,
-  nameOf: ((rect: number) => string) | null,
 ): void {
   const devicePixelRatio = style.pixelRatio;
   const bufferWidth = Math.round(width * devicePixelRatio);
@@ -206,8 +199,8 @@ export function paintCushion(
   const pixels = cushionPixels;
 
   const { colors, colorMode } = style;
-  const fills = colorMode === 'type' ? colors.category : colors.age;
-  const buckets = colorMode === 'type' ? layout.category : layout.age;
+  const fills = colorFills(colors, colorMode);
+  const buckets = colorBuckets(layout, colorMode);
   const fillChannels = fills.map(channels);
   const [backgroundRed, backgroundGreen, backgroundBlue] = channels(colors.background);
   if (LITTLE_ENDIAN) pixels.fill(packedPixel(backgroundRed, backgroundGreen, backgroundBlue));
@@ -217,6 +210,7 @@ export function paintCushion(
   const fadedGreen = backgroundGreen * (1 - DIMMED_ALPHA);
   const fadedBlue = backgroundBlue * (1 - DIMMED_ALPHA);
   const surface = layout.surface;
+  const facet = style.shading === 'facet';
 
   for (let i = 0; i < layout.count; i++) {
     // Edges on whole device pixels by the same rounding as snapToDevicePixel, so neighbours share an
@@ -253,7 +247,7 @@ export function paintCushion(
       const normalY = rowNormals[row];
       let index = row * bufferWidth + firstColumn;
       for (let column = firstColumn; column < right; column++, index++) {
-        const brightness = brightnessOfNormal(columnNormals[column], normalY);
+        const brightness = facet ? facetBrightness(column, row, left, top, right, bottom) : brightnessOfNormal(columnNormals[column], normalY);
         let shadedRed = shadeChannel(red, brightness);
         let shadedGreen = shadeChannel(green, brightness);
         let shadedBlue = shadeChannel(blue, brightness);
@@ -268,30 +262,4 @@ export function paintCushion(
     }
   }
   context.putImageData(image, 0, 0);
-
-  if (!nameOf) return;
-  context.globalAlpha = 1;
-  context.font = style.font;
-  context.textBaseline = 'middle';
-  const measure = (text: string) => context.measureText(text).width;
-  for (let i = 0; i < layout.count; i++) {
-    if (layout.w[i] < 0.5 || layout.h[i] < 0.5) continue;
-    const bucket = buckets[i];
-    if (dimmed !== null && !dimmed.has(bucket)) continue;
-    const rectX = snapToDevicePixel(layout.x[i], devicePixelRatio);
-    const rectY = snapToDevicePixel(layout.y[i], devicePixelRatio);
-    const rectWidth = snappedExtent(layout.x[i], layout.w[i], devicePixelRatio);
-    const rectHeight = snappedExtent(layout.y[i], layout.h[i], devicePixelRatio);
-    const label = fittedLabel(layout, i, rectWidth, rectHeight, nameOf, measure);
-    if (label === '') continue;
-    // The text color that reads best over the shaded row the label sits on, judged at both of its ends.
-    const textX = rectX + LABEL_LEFT;
-    const textY = rectY + LABEL_MIDDLE;
-    const offset = i * 4;
-    const brightnessOnRow = (x: number) => brightnessAt(surface[offset], surface[offset + 1], surface[offset + 2], surface[offset + 3], x, textY);
-    const startBrightness = brightnessOnRow(textX);
-    const endBrightness = brightnessOnRow(textX + measure(label));
-    context.fillStyle = labelColorOn(fills[bucket], startBrightness, endBrightness);
-    context.fillText(label, textX, textY);
-  }
 }

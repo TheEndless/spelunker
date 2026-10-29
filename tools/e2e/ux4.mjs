@@ -27,7 +27,7 @@ await sleep(600);
 // ---- the preview starts at its default share and has a splitter
 const start = await rect('aside.preview');
 const splitter = await rect(PREVIEW_SPLITTER);
-check('the preview starts at about 38 percent of the window', start.w > 440 && start.w < 540, start);
+check('the preview starts at about 25 percent of the window', start.w > 300 && start.w < 400, start);
 check('a splitter sits on the preview edge', splitter && Math.abs(splitter.cx - start.x) < 6, { splitter, start });
 
 // ---- drag it
@@ -96,7 +96,7 @@ const gridWithPreview = await gridState();
 // A real click focuses the button first, and that is what decides where focus goes afterwards.
 await ev(`(() => { const b = document.querySelector('button[aria-label="Hide the preview"]'); b.focus(); b.click(); })()`);
 await sleep(700);
-const rail = await rect('.rail');
+const rail = await rect('.rail[data-pane=preview]');
 check('Hide the preview leaves a narrow strip on the right', rail && rail.w < 50 && !(await ev(`!!document.querySelector('aside.preview')`)), rail);
 const focusAfterHide = await ev(`document.activeElement.closest('[data-pane]')?.getAttribute('data-pane')`);
 check('focus moves to the results when the preview it was in disappears', focusAfterHide === 'results', focusAfterHide);

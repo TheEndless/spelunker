@@ -120,7 +120,6 @@ export function countActiveFilters(criteria: Criteria): number {
     size: criteria.size,
     modified: criteria.modified,
     created: criteria.created,
-    nameIsRegex: criteria.nameIsRegex,
     multiLine: criteria.multiLine,
   });
 }

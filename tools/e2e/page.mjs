@@ -1,5 +1,6 @@
 // What every end-to-end script needs: a connection to the app's page over the Chrome DevTools
 // protocol, real key and mouse events, a way to fill a field, and a pass/fail tally.
+import { findSpelunkerPage } from './target.mjs';
 
 const KEY_CODES = {
   Backspace: 8, Tab: 9, Enter: 13, Escape: 27, ' ': 32, End: 35, Home: 36, ArrowLeft: 37, ArrowUp: 38,
@@ -21,8 +22,7 @@ export const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resol
 export async function openPage({ port = 9222, webSocketDebuggerUrl = null, onEvent = null } = {}) {
   let address = webSocketDebuggerUrl;
   if (!address) {
-    const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
-    address = targets.find((target) => target.type === 'page').webSocketDebuggerUrl;
+    address = (await findSpelunkerPage(port)).webSocketDebuggerUrl;
   }
   const socket = new WebSocket(address);
   await new Promise((resolve, reject) => {

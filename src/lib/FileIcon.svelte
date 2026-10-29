@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fileCategory, type FileCategory } from './fileKinds';
   import Icon, { type IconName } from './Icon.svelte';
+  import { systemIconUrl } from './systemIcons.svelte';
 
   interface Props {
     name: string;
@@ -25,13 +26,25 @@
     other: 'file',
   };
 
+  /** Up to this size the system's small icon is used, and above it the large one. */
+  const MAX_SMALL_ICON_SIZE = 20;
+
   const category = $derived(fileCategory(name));
+  const systemIcon = $derived(systemIconUrl(name, size > MAX_SMALL_ICON_SIZE));
 </script>
 
-<!-- The tint is a hint only. The file's name sits right beside it, so the icon is decorative. -->
-<span class="kind kind-{category}"><Icon name={ICONS[category]} {size} /></span>
+<!-- The icon is decorative: the file's name sits right beside it. The drawn icon, tinted by kind, stands in until the system's arrives and where it has none. -->
+{#if systemIcon}
+  <img class="system" src={systemIcon} width={size} height={size} alt="" draggable="false" />
+{:else}
+  <span class="kind kind-{category}"><Icon name={ICONS[category]} {size} /></span>
+{/if}
 
 <style>
+  .system {
+    flex: none;
+    object-fit: contain;
+  }
   .kind {
     display: inline-flex;
     flex: none;

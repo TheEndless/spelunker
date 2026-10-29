@@ -14,7 +14,6 @@ export interface ViewSettings {
   zoomFolderId: number | null;
   colors: MapColors;
   forced: ForcedColors | null;
-  font: string;
   /** Color buckets shown at full strength, or null when nothing is dimmed. */
   dimmed: number[] | null;
   /** Cushion is laid out with no gap inside folders and lit per pixel. Flat keeps the gap and plain fills. */
@@ -28,7 +27,8 @@ export type ToWorker =
   | { type: 'remove'; ids: number[] }
   | { type: 'layout'; sequence: number; view: ViewSettings }
   | { type: 'locate'; requestId: number; fileId: number }
-  | { type: 'describe'; requestId: number; folderId: number };
+  | { type: 'describe'; requestId: number; folderId: number }
+  | { type: 'representative'; requestId: number; folderId: number; wholeFolder: boolean };
 
 /** One step of the breadcrumb: a folder the map can zoom to. */
 export interface Crumb {
@@ -51,7 +51,8 @@ export type FromWorker =
       /** The metric the layout's weights are in, which the view may have moved on from. */
       metric: Metric;
       crumbs: Crumb[];
-      zoomFolderId: number;
+      /** The folder laid out when it is a zoom (chosen, or followed after its parent was pruned), and null when it is just the top of the results, which grows as results arrive. */
+      zoomFolderId: number | null;
       painted: boolean;
       largestFolder: string;
       elapsedMs: { layout: number; paint: number };
@@ -59,4 +60,5 @@ export type FromWorker =
   /** The worker threw while laying out or painting `sequence`. The page keeps its previous picture and tries again later. */
   | { type: 'layoutFailed'; sequence: number; message: string }
   | ({ type: 'located'; requestId: number } & Located)
-  | { type: 'described'; requestId: number; path: string };
+  | { type: 'described'; requestId: number; path: string }
+  | { type: 'representativeFile'; requestId: number; fileId: number };

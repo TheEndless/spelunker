@@ -31,6 +31,8 @@
   /** Most lines the matches view lists, so a pattern like "e" cannot build a page of millions of rows. */
   const MAX_MATCH_VIEW_LINES = 5000;
   const LINE_HEIGHT = 19;
+  /** The icon above a file the preview cannot show. It is the size of the system's large icon, so it stays sharp. */
+  const CARD_ICON_SIZE = 32;
 
   type ViewMode = 'matches' | 'file';
 
@@ -307,6 +309,10 @@
       {#if mediaError}
         <p class="note error">{mediaProblem ?? 'This PDF could not be shown.'}</p>
       {:else if mediaSource}
+        <!-- No sandbox attribute: WebView2 will not draw a PDF inside a sandboxed frame (it shows the
+             blocked-content icon). What keeps a page out of this frame instead is that allow_preview
+             accepts a ".pdf" only when the file begins with the PDF header, and the CSP limits frames
+             to the asset origin. -->
         <iframe class="pdf" title="PDF preview of {file.name}" src={mediaSource}></iframe>
       {/if}
     {/key}
@@ -317,7 +323,7 @@
         {#if mediaError}
           <p class="note error">The system cannot play this file here. Use Open to play it in another app.</p>
         {:else if kind === 'audio'}
-          <FileIcon name={file.name} size={48} />
+          <FileIcon name={file.name} size={CARD_ICON_SIZE} />
           <!-- svelte-ignore a11y_media_has_caption -->
           <audio controls src={mediaSource ?? undefined} onerror={() => (mediaError = true)}></audio>
         {:else}
@@ -329,7 +335,7 @@
   {:else if kind === 'other' || fileText?.binary}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="card" role="region" aria-label="File details" tabindex="0">
-      <FileIcon name={file.name} size={56} />
+      <FileIcon name={file.name} size={CARD_ICON_SIZE} />
       <h3>{file.name}</h3>
       <dl>
         <dt>Type</dt>
@@ -589,6 +595,11 @@
   }
   .line:hover:not(.active) {
     background: var(--row-hover);
+  }
+  .text,
+  dd,
+  h3 {
+    user-select: text;
   }
   .number {
     flex: none;

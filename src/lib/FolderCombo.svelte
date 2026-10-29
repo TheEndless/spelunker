@@ -200,7 +200,7 @@
     align-items: center;
     gap: 4px;
     padding: 4px 4px 4px 8px;
-    border-radius: 4px;
+    border-radius: 3px;
     border-left: 2px solid transparent;
     font-size: var(--text-small);
     cursor: pointer;

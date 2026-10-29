@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { AGE_LABELS, CATEGORY_LABELS, type MapColors } from './treemapColors';
-import { AGE_BUCKET_COUNT, CATEGORY_COUNT, RectKind } from './treemapLayout';
+import { AGE_LABELS, CATEGORY_LABELS, SIZE_LABELS, type MapColors } from './treemapColors';
+import { AGE_BUCKET_COUNT, CATEGORY_COUNT, RectKind, SIZE_CLASS_COUNT } from './treemapLayout';
 import { effectiveFilter, fileTooltip, formatWeight, groupTooltip, legendEntries, summaryText, zoomButton } from './mapText';
 import type { DisplayRow } from './types';
 
@@ -8,6 +8,7 @@ const colors: MapColors = {
   background: '#FFFFFF',
   category: CATEGORY_LABELS.map((_, index) => `#0000${index.toString(16).padStart(2, '0')}`),
   age: AGE_LABELS.map((_, index) => `#00${index.toString(16).padStart(2, '0')}00`),
+  size: SIZE_LABELS.map((_, index) => `#${index.toString(16).padStart(2, '0')}0000`),
   outlineLight: '#FFFFFF',
   outlineDark: '#000000',
 };
@@ -52,7 +53,7 @@ describe('summaryText', () => {
 });
 
 describe('legendEntries', () => {
-  const empty = { categoryWeight: new Float64Array(CATEGORY_COUNT), ageWeight: new Float64Array(AGE_BUCKET_COUNT) };
+  const empty = { categoryWeight: new Float64Array(CATEGORY_COUNT), ageWeight: new Float64Array(AGE_BUCKET_COUNT), sizeWeight: new Float64Array(SIZE_CLASS_COUNT) };
 
   it('lists only the legend entries that have weight, largest first', () => {
     const layout = { ...empty, categoryWeight: weights(CATEGORY_COUNT, { 1: 5, [CATEGORY_COUNT - 1]: 3 }) };

@@ -8,6 +8,7 @@ import {
   selectAll,
   selectOnly,
   selectedRows,
+  shownPath,
   toggleCurrent,
   type Modifiers,
   type SelectionState,
@@ -264,6 +265,26 @@ describe('selectAll', () => {
       expect(ranged.paths.size).toBe(100_000);
     }
     expect(fastest).toBeLessThan(100);
+  });
+});
+
+describe('shownPath', () => {
+  it('is the current row while it is selected', () => {
+    expect(shownPath(selectOnly('b'))).toBe('b');
+  });
+
+  it('still leads when Ctrl+Arrow moved it off the selection', () => {
+    expect(shownPath(moveCurrent(selectOnly('a'), rows, 1, CTRL))).toBe('b');
+  });
+
+  it('is nothing once Ctrl+click or Ctrl+Space deselected the last selected file', () => {
+    const afterRelease = releaseRow(selectOnly('b'), rows, 1, CTRL, true);
+    expect(shownPath(afterRelease)).toBeNull();
+    expect(shownPath(toggleCurrent(selectOnly('b')))).toBeNull();
+  });
+
+  it('is nothing when nothing was ever selected', () => {
+    expect(shownPath(EMPTY_SELECTION)).toBeNull();
   });
 });
 

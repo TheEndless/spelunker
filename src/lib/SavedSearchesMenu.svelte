@@ -122,7 +122,7 @@
     padding: 8px;
     background: var(--surface-raised);
     border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border-radius: 5px;
     box-shadow: var(--shadow);
     display: grid;
     gap: 6px;
@@ -144,7 +144,7 @@
     background: none;
     border: 0;
     padding: 5px 8px;
-    border-radius: 4px;
+    border-radius: 3px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -180,7 +180,7 @@
     background: var(--accent);
     color: var(--on-accent);
     border: 0;
-    border-radius: 5px;
+    border-radius: 3px;
     padding: 0 12px;
     font-weight: 600;
   }

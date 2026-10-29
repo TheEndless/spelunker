@@ -66,7 +66,7 @@
     padding: 16px 18px;
     background: var(--surface-raised);
     border: 1px solid var(--border-strong);
-    border-radius: 8px;
+    border-radius: 6px;
     box-shadow: var(--shadow);
   }
   .spinner {
@@ -99,7 +99,7 @@
   button {
     background: var(--surface);
     border: 1px solid var(--border-strong);
-    border-radius: 5px;
+    border-radius: 3px;
     padding: 4px 12px;
   }
   button:hover {

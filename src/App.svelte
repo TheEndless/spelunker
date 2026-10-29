@@ -19,7 +19,7 @@
   } from './lib/backend';
   import ContextMenu from './lib/ContextMenu.svelte';
   import { countActiveFilters, type Criteria } from './lib/criteria';
-  import { editorTemplate } from './lib/editors';
+  import { editorLaunch } from './lib/editors';
   import { describeEmptyState } from './lib/emptyState';
   import { exportFileName, formatResults, type ExportFormat } from './lib/exportResults';
   import HorizontalSplitter from './lib/HorizontalSplitter.svelte';
@@ -48,6 +48,7 @@
     releaseRow,
     selectAll,
     selectOnly,
+    shownPath,
     toggleCurrent,
     type Modifiers,
     type SelectionState,
@@ -59,6 +60,8 @@
   import StatusBar from './lib/StatusBar.svelte';
   import StoppingDialog from './lib/StoppingDialog.svelte';
   import type { DisplayRow } from './lib/types';
+  import UpdateBanner from './lib/UpdateBanner.svelte';
+  import { UpdateChecker } from './lib/updates.svelte';
   import { createValidator } from './lib/validation.svelte';
   import { goneNotice, removeGoneRows, skippedNotice } from './lib/vanishedRows';
 
@@ -88,10 +91,10 @@
   let mainElement = $state<HTMLElement>();
   /**
    * The preview's width as CSS, so the browser keeps it right as the window changes with no help
-   * from a measurement that could go stale: the width the user chose, or about 38 percent, and never
+   * from a measurement that could go stale: the width the user chose, or 25 percent, and never
    * less than 280 px or more than leaves the results 360 px.
    */
-  const previewTrack = $derived(`clamp(280px, ${preferences.previewWidth === null ? '38%' : `${preferences.previewWidth}px`}, calc(100% - 360px))`);
+  const previewTrack = $derived(`clamp(280px, ${preferences.previewWidth === null ? '25%' : `${preferences.previewWidth}px`}, calc(100% - 360px))`);
   const treemap = new TreemapClient(session);
   let resultsMap = $state<ResultsMap>();
   /** The results grid and the map below it. Its height decides whether the map fits. */
@@ -116,12 +119,14 @@
   );
   /** The results selection. Its current row drives everything that shows one file. */
   let selection = $state.raw<SelectionState>(EMPTY_SELECTION);
-  const selectedPath = $derived(selection.current);
+  /** The file the map outlines and the preview shows, see shownPath. */
+  const selectedPath = $derived(shownPath(selection));
   /** The criteria of the search whose results are on screen, used to explain an empty list. */
   let searchedCriteria = $state.raw<Criteria | null>(null);
   /** The app's own file menu, used only where Windows' menu is unavailable (a plain browser). */
   let menu = $state.raw<{ rows: DisplayRow[]; x: number; y: number } | null>(null);
   let settingsOpen = $state(false);
+  const updates = new UpdateChecker(preferences);
   let notice = $state<{ kind: 'info' | 'error'; text: string } | null>(null);
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -246,7 +251,7 @@
 
   const canExport = $derived(!session.running && session.rows.length > 0);
 
-  $effect(() => applyTheme(preferences.theme, preferences.palette, preferences.highlightColor));
+  $effect(() => applyTheme(preferences.theme, preferences.palette));
 
   let draggingOver = $state(false);
 
@@ -268,7 +273,7 @@
   }
 
   onMount(() => {
-    searchBar.focusText();
+    // No field has the keyboard at launch: none of them is the obvious first one. Ctrl+N, Ctrl+T and Ctrl+L go to a field.
     // Dropping a folder (or a file, which stands for its folder) from Explorer sets Look in.
     const stopWatching = watchFolderDrops(
       (folders) => (preferences.criteria.lookIn = folders.join('; ')),
@@ -277,6 +282,7 @@
     // "Search with Spelunker" in Explorer's menu starts the app (or reaches the running one) with a folder.
     void takeLaunchFolder().then((folder) => folder && useFolder(folder));
     const stopWatchingLaunches = watchOpenFolder(useFolder);
+    updates.checkOnStart();
     // The column's height does not depend on the map, so watching it to decide whether the map fits cannot loop.
     const leftColumnObserver = new ResizeObserver(() => (leftColumnHeight = leftColumn?.clientHeight ?? 0));
     if (leftColumn) leftColumnObserver.observe(leftColumn);
@@ -471,7 +477,7 @@
   }
 
   function openAtLine(path: string, line: number) {
-    openInEditor(editorTemplate(preferences.editor), path, line).catch((error) => say('error', String(error)));
+    openInEditor(editorLaunch(preferences.editor), path, line).catch((error) => say('error', String(error)));
   }
 
   async function exportResults(format: ExportFormat) {
@@ -498,26 +504,31 @@
 {/snippet}
 
 <div class="app">
-  <SearchBar
-    bind:this={searchBar}
-    {preferences}
-    savedSearches={savedSearches.searches}
-    savedNotice={savedSearches.notice}
-    running={session.running}
-    stopping={session.stopping}
-    failure={(preferences.filtersOpen ? null : filterError) ?? session.failure}
-    contentError={contentValidator.error}
-    nameError={nameValidator.error}
-    {canSearch}
-    {canExport}
-    onSearch={startSearch}
-    onStop={() => session.stop()}
-    onSaveSearch={(name) => savedSearches.save(name, $state.snapshot(preferences.criteria))}
-    onRecallSearch={recallSearch}
-    onDeleteSearch={(name) => savedSearches.remove(name)}
-    onExport={exportResults}
-    onOpenSettings={() => (settingsOpen = true)}
-  />
+  <div class="top">
+    <SearchBar
+      bind:this={searchBar}
+      {preferences}
+      savedSearches={savedSearches.searches}
+      savedNotice={savedSearches.notice}
+      running={session.running}
+      stopping={session.stopping}
+      failure={(preferences.filtersOpen ? null : filterError) ?? session.failure}
+      contentError={contentValidator.error}
+      nameError={nameValidator.error}
+      {canSearch}
+      {canExport}
+      onSearch={startSearch}
+      onStop={() => session.stop()}
+      onSaveSearch={(name) => savedSearches.save(name, $state.snapshot(preferences.criteria))}
+      onRecallSearch={recallSearch}
+      onDeleteSearch={(name) => savedSearches.remove(name)}
+      onExport={exportResults}
+      onOpenSettings={() => (settingsOpen = true)}
+    />
+    {#if updates.announced}
+      <UpdateBanner info={updates.announced} onDismiss={() => updates.dismiss()} />
+    {/if}
+  </div>
 
   <main
     bind:this={mainElement}
@@ -577,7 +588,7 @@
             client={treemap}
             {session}
             paletteId={preferences.palette}
-            themeVersion={`${preferences.theme}|${preferences.palette}|${preferences.highlightColor}`}
+            themeVersion={`${preferences.theme}|${preferences.palette}`}
             metric={effectiveMetric}
             colorMode={preferences.mapColor}
             shading={preferences.mapShading}
@@ -651,6 +662,7 @@
     running={session.running}
     stopping={session.stopping}
     filesScanned={session.filesScanned}
+    folder={session.currentFolder}
     matches={session.rows.length}
     elapsedMs={session.elapsedMs}
     errors={session.errors}
@@ -685,7 +697,7 @@
 <StoppingDialog visible={session.stoppingNoticeVisible} onHide={() => session.hideStoppingNotice()} />
 
 {#if settingsOpen}
-  <SettingsDialog {preferences} onClose={() => (settingsOpen = false)} />
+  <SettingsDialog {preferences} {updates} onClose={() => (settingsOpen = false)} />
 {/if}
 
 {#if menu}
@@ -705,6 +717,10 @@
     height: 100%;
     display: grid;
     grid-template-rows: auto 1fr auto;
+  }
+  /* The toolbar and, when there is one, the update banner, so the banner takes no row of its own. */
+  .top {
+    display: grid;
   }
   main {
     position: relative;
@@ -754,7 +770,7 @@
     display: grid;
     place-items: center;
     border: 2px dashed var(--accent);
-    border-radius: 10px;
+    border-radius: 8px;
     background: color-mix(in srgb, var(--bg) 70%, transparent);
     pointer-events: none;
   }

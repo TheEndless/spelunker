@@ -12,22 +12,24 @@ export const EDITOR_CHOICES: { id: EditorId; label: string; hint: string }[] = [
   { id: 'default', label: 'System default', hint: 'Opens the file with the app Windows chooses. It cannot jump to a line.' },
   { id: 'vscode', label: 'Visual Studio Code', hint: 'Needs the "code" command, which the VS Code installer adds to PATH.' },
   { id: 'notepadpp', label: 'Notepad++', hint: 'Found in its usual install folder.' },
-  { id: 'custom', label: 'Custom command', hint: 'Use {path} for the file and {line} for the line number.' },
+  { id: 'custom', label: 'Custom command', hint: 'Use {path} for the file and {line} for the line number. The first time a command runs, Spelunker asks you to approve it.' },
 ];
 
-const TEMPLATES: Record<Exclude<EditorId, 'default' | 'custom'>, string> = {
-  vscode: 'code.cmd -g "{path}:{line}"',
-  notepadpp: 'notepad++ -n{line} "{path}"',
-};
+/** What to ask the backend for. The built-in editors are named, and the backend holds their command lines. */
+export interface EditorLaunch {
+  editor: Exclude<EditorId, 'default'>;
+  /** The custom command, which the person is asked to approve the first time it is used. Empty for the built-in editors. */
+  customTemplate: string;
+}
 
-/** The command to run for the chosen editor, or null when files should open with the system default. */
-export function editorTemplate(settings: EditorSettings): string | null {
+/** What to ask for with the chosen editor, or null when files should open with the system default. */
+export function editorLaunch(settings: EditorSettings): EditorLaunch | null {
   if (settings.id === 'default') return null;
   if (settings.id === 'custom') {
     const custom = settings.customTemplate.trim();
-    return custom === '' ? null : custom;
+    return custom === '' ? null : { editor: 'custom', customTemplate: custom };
   }
-  return TEMPLATES[settings.id];
+  return { editor: settings.id, customTemplate: '' };
 }
 
 export function normalizeEditor(raw: unknown): EditorSettings {

@@ -25,7 +25,7 @@ function load(records: TreemapRecord[]) {
 
 const view = (zoomFolderId: number | null, shading: Shading = 'cushion'): ViewSettings => ({
   width: 100, height: 100, devicePixelRatio: 1, metric: 'size', colorMode: 'type', zoomFolderId,
-  colors: mapColors(PALETTES[0].dark, 'dark'), forced: null, font: '', dimmed: null, shading,
+  colors: mapColors(PALETTES[0].dark, 'dark'), forced: null, dimmed: null, shading,
 });
 
 function layout(zoomFolderId: number | null = null, shading: Shading = 'cushion'): LayoutReply {
@@ -38,7 +38,7 @@ function recordingCanvas() {
   const calls: string[] = [];
   const record = (name: string) => () => void calls.push(name);
   const context = {
-    fillStyle: '', strokeStyle: '', globalAlpha: 1, font: '', textBaseline: '', lineWidth: 1,
+    fillStyle: '', strokeStyle: '', globalAlpha: 1, lineWidth: 1,
     setTransform: record('setTransform'), fillRect: record('fillRect'), strokeRect: record('strokeRect'), fillText: record('fillText'),
     measureText: (text: string) => ({ width: text.length * 6 }),
     createImageData: (width: number, height: number) => ({ width, height, data: new Uint8ClampedArray(width * height * 4) }),
@@ -190,8 +190,10 @@ describe('treemap worker', () => {
       expect(reply.crumbs.at(-1)!.label).toBe('y');
     });
 
-    it('falls back to the top for a folder id it does not know', () => {
-      expect(layout(999_999).zoomFolderId).toBe(folderId('C:'));
+    it('falls back to the top for a folder id it does not know, and reports no zoom', () => {
+      const reply = layout(999_999);
+      expect(reply.zoomFolderId).toBeNull();
+      expect(reply.crumbs).toHaveLength(1);
     });
 
     it('says which metric the layout was made with', () => {
@@ -203,6 +205,32 @@ describe('treemap worker', () => {
     it('names the heaviest folder directly under the laid-out folder', () => {
       expect(layout().largestFolder).toBe('x');
       expect(layout(folderId('C:\\z')).largestFolder).toBe('');
+    });
+  });
+
+  describe('a search that is still streaming', () => {
+    const fileIds = (reply: LayoutReply) =>
+      Array.from({ length: reply.layout.count }, (_, i) => i)
+        .filter((i) => reply.layout.kind[i] === RectKind.File)
+        .map((i) => reply.layout.id[i]);
+
+    it('shows results that arrive outside the folder the first layout happened to sit in', () => {
+      load([record(1, 'C:\\work\\a\\deep', 10), record(2, 'C:\\work\\a\\deep', 10)]);
+      const first = layout();
+      expect(fileIds(first)).toEqual(expect.arrayContaining([1, 2]));
+      handleMessage({ type: 'add', records: [record(3, 'C:\\other', 10)] }, send);
+      // The page sends back the zoom the worker answered with, as the client does.
+      const second = layout(first.zoomFolderId);
+      expect(fileIds(second)).toEqual(expect.arrayContaining([1, 2, 3]));
+    });
+
+    it('keeps a zoom the user chose, even when more results arrive', () => {
+      load([record(1, 'C:\\work\\a', 10), record(2, 'C:\\work\\b', 10), record(3, 'C:\\work\\b', 10)]);
+      const whole = layout();
+      const chosen = whole.crumbs.at(-1)!.folderId;
+      handleMessage({ type: 'add', records: [record(4, 'C:\\other', 10)] }, send);
+      const zoomed = layout(chosen);
+      expect(fileIds(zoomed)).not.toContain(4);
     });
   });
 
@@ -238,6 +266,21 @@ describe('treemap worker', () => {
       const block = { kind: RectKind.FolderBlock, id: folderId('C:\\b') };
       expect(describeRect(reply.layout, locate(4).rect)).toEqual(block);
       expect(describeRect(reply.layout, locate(5).rect)).toEqual(block);
+    });
+
+    it('names the heaviest hidden file of a group, a block, or nothing', () => {
+      layout();
+      const hidden = (path: string, wholeFolder: boolean) => {
+        handleMessage({ type: 'representative', requestId: ++requestId, folderId: folderId(path), wholeFolder }, send);
+        return (replies.at(-1) as Extract<FromWorker, { type: 'representativeFile' }>).fileId;
+      };
+      // Folder a's group holds the two tiny files, and the huge file has a rectangle of its own.
+      expect([2, 3]).toContain(hidden('C:\\a', false));
+      // Folder b is one block over its own file and the one below it, and file 4 weighs more.
+      expect(hidden('C:\\b', true)).toBe(4);
+      // Without the subfolders, only file 4 counts, and a folder with no files has none.
+      expect(hidden('C:\\b', false)).toBe(4);
+      expect(hidden('C:', false)).toBe(-1);
     });
 
     it('does not place a zero-size file, which is not drawn', () => {

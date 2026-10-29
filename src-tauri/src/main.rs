@@ -6,20 +6,25 @@ mod drives;
 mod dropped_paths;
 mod dto;
 mod editor;
+mod editor_approvals;
 mod file_drag;
+mod file_icon;
+mod folder_dialog;
 mod modal_guard;
 mod navigation;
 mod os_datetime;
 mod preview_access;
 mod roots;
+mod search_scope;
 mod shell_integration;
 mod shell_items;
 mod shell_menu;
 mod store;
 mod type_name;
+mod updates;
 
 use tauri::{Emitter, Manager};
-use tauri_plugin_window_state::StateFlags;
+use tauri_plugin_window_state::{StateFlags, WindowExt};
 
 /// The folders named by command-line arguments, as Explorer passes them from the folder menu.
 /// A relative argument (a terminal launch such as `spelunker .`) is taken from `working_folder`,
@@ -67,12 +72,22 @@ fn ensure_explorer_entry(app: &tauri::AppHandle) {
 /// end-to-end scripts never take focus from the person using the machine (see tools/e2e/README.md).
 const NO_FOCUS_VARIABLE: &str = "SPELUNKER_NO_FOCUS";
 
-/// Whether the app may bring its window forward: when the window first appears, on a second
-/// launch, and when the window state plugin shows the restored window. Only a debug build listens
-/// to the variable, so a release build always does, whatever the environment says.
+/// Whether the app may bring its window forward: when the window first appears and on a second
+/// launch. Only a debug build listens to the variable, so a release build always does, whatever the
+/// environment says.
 fn should_take_focus(debug_build: bool, no_focus_value: Option<&str>) -> bool {
     !debug_build || no_focus_value != Some("1")
 }
+
+/// The label of the one window, in tauri.conf.json.
+const MAIN_WINDOW: &str = "main";
+
+/// What is saved of the window and put back at launch. Not whether it is visible: the window always
+/// shows once it has been put back.
+const RESTORED_WINDOW_STATE: StateFlags = StateFlags::SIZE
+    .union(StateFlags::POSITION)
+    .union(StateFlags::MAXIMIZED)
+    .union(StateFlags::FULLSCREEN);
 
 fn main() {
     let launch_arguments: Vec<String> = std::env::args().skip(1).collect();
@@ -80,19 +95,20 @@ fn main() {
         cfg!(debug_assertions),
         std::env::var(NO_FOCUS_VARIABLE).ok().as_deref(),
     );
-    // Restoring the saved "visible" state shows the window and then focuses it, so a run that must
-    // not take focus leaves that one part of the state alone.
-    let mut window_state = tauri_plugin_window_state::Builder::default();
-    if !take_focus {
-        window_state = window_state.with_state_flags(StateFlags::all() - StateFlags::VISIBLE);
-    }
+    // The plugin saves the window's size, position and maximized or fullscreen state as it changes.
+    // It does not restore the window itself: by default it does so the moment the window exists,
+    // while the window is already on screen at its default size, so the window would show there and
+    // then jump. The window is restored in `setup` instead, before it is first shown.
+    let window_state = tauri_plugin_window_state::Builder::default()
+        .with_state_flags(RESTORED_WINDOW_STATE)
+        .skip_initial_state(MAIN_WINDOW);
 
     tauri::Builder::default()
         // A second launch (for example from Explorer's menu) hands its folder to the running window.
         .plugin(tauri_plugin_single_instance::init(
             move |app, arguments, working_folder| {
                 if take_focus {
-                    if let Some(window) = app.get_webview_window("main") {
+                    if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                         let _ = window.unminimize();
                         let _ = window.set_focus();
                     }
@@ -113,10 +129,12 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(commands::ActiveSearch::default())
+        .manage(search_scope::SearchScope::default())
         .manage(commands::LaunchFolder::default())
         .setup(move |app| {
             let folder = app.path().app_data_dir()?;
             app.manage(store::SavedSearchStore::in_folder(&folder));
+            app.manage(editor_approvals::ApprovedEditors::in_folder(&folder));
             app.state::<commands::LaunchFolder>()
                 .set(folders_from_arguments(
                     &launch_arguments,
@@ -132,19 +150,33 @@ fn main() {
                 .first()
                 .cloned()
                 .expect("tauri.conf.json defines the main window");
-            // A run that must not take focus shows the window without activating it.
+            // A run that must not take focus shows the window without activating it, which only
+            // happens when the window is made visible, so such a run does not hold it back.
             window_config.focus &= take_focus;
-            tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
+            // Otherwise the window is made hidden, put back where it was last, and only then shown,
+            // so it first appears at its saved size and position with no move or resize to see.
+            window_config.visible = !take_focus;
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?
                 .on_navigation(|url| navigation::is_app_page(url, cfg!(debug_assertions)))
                 .build()?;
+            // With nothing saved yet (a first launch) this changes nothing, and the window still shows.
+            if let Err(error) = window.restore_state(RESTORED_WINDOW_STATE) {
+                eprintln!("could not restore the window's saved state: {error}");
+            }
+            if take_focus {
+                window.show()?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::start_search,
             commands::stop_search,
+            commands::file_icon,
+            commands::check_for_updates,
+            commands::open_release_page,
             commands::preview,
             commands::read_file_text,
-            commands::write_text_file,
+            commands::save_text_file,
             commands::open_in_editor,
             commands::open_path,
             commands::reveal_path,
@@ -160,6 +192,8 @@ fn main() {
             commands::allow_preview,
             commands::existing_paths,
             commands::start_file_drag,
+            commands::pick_folder,
+            commands::this_pc_label,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Spelunker");

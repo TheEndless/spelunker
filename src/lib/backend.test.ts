@@ -31,6 +31,25 @@ beforeEach(() => {
   invoke.mockReset();
 });
 
+describe('the folder dialog inside Tauri', () => {
+  it('asks the native picker, which can answer with the This PC label', async () => {
+    invoke.mockResolvedValueOnce('This PC (C:, D:)');
+    expect(await backend.pickFolder()).toBe('This PC (C:, D:)');
+    expect(invoke).toHaveBeenCalledWith('pick_folder');
+  });
+
+  it('answers null when the dialog was cancelled', async () => {
+    invoke.mockResolvedValueOnce(null);
+    expect(await backend.pickFolder()).toBeNull();
+  });
+
+  it('asks the backend for the This PC label that lists the drives', async () => {
+    invoke.mockResolvedValueOnce('This PC (C:, D:, E:)');
+    expect(await backend.thisPcLabel()).toBe('This PC (C:, D:, E:)');
+    expect(invoke).toHaveBeenCalledWith('this_pc_label');
+  });
+});
+
 describe('existingPaths inside Tauri', () => {
   const paths = Array.from({ length: 1000 }, (_, index) => `C:\\data\\file_${index}.txt`);
 

@@ -35,11 +35,11 @@ describe('mapColors', () => {
         it('defines every category and age color as hex', () => {
           expect(colors.category).toHaveLength(FILE_CATEGORIES.length);
           expect(colors.age).toHaveLength(AGE_BUCKET_COUNT);
-          for (const color of [...colors.category, ...colors.age, colors.background]) expect(color).toMatch(HEX);
+          for (const color of [...colors.category, ...colors.age, ...colors.size, colors.background]) expect(color).toMatch(HEX);
         });
 
         it('keeps every base fill at least 3:1 against the map background (Flat mode and the legend paint it as is)', () => {
-          for (const color of [...colors.category, ...colors.age]) {
+          for (const color of [...colors.category, ...colors.age, ...colors.size]) {
             expect(contrast(color, colors.background)).toBeGreaterThanOrEqual(3);
           }
         });
@@ -61,7 +61,7 @@ describe('mapColors', () => {
         });
 
         it('keeps the shaded mean of every fill at least 3:1 against the map background', () => {
-          for (const base of [...colors.category, ...colors.age]) {
+          for (const base of [...colors.category, ...colors.age, ...colors.size]) {
             expect(contrast(shadedMean(base), colors.background)).toBeGreaterThanOrEqual(3);
           }
         });
@@ -70,6 +70,15 @@ describe('mapColors', () => {
           for (let i = 0; i < colors.category.length; i++) {
             for (let j = i + 1; j < colors.category.length; j++) {
               expect(perceptualDistance(colors.category[i], colors.category[j])).toBeGreaterThanOrEqual(MIN_CATEGORY_DISTANCE);
+            }
+          }
+        });
+
+        it('keeps the size classes clearly apart, each with its own color', () => {
+          expect(new Set(colors.size).size).toBe(colors.size.length);
+          for (let i = 0; i < colors.size.length; i++) {
+            for (let j = i + 1; j < colors.size.length; j++) {
+              expect(perceptualDistance(colors.size[i], colors.size[j])).toBeGreaterThanOrEqual(MIN_CATEGORY_DISTANCE);
             }
           }
         });
@@ -163,5 +172,21 @@ describe('labelColorOn', () => {
         });
       }
     }
+  });
+});
+
+describe('mapColors across themes', () => {
+  const light = (id: string) => mapColors(PALETTES.find((palette) => palette.id === id)!.light, 'light');
+  const dark = (id: string) => mapColors(PALETTES.find((palette) => palette.id === id)!.dark, 'dark');
+
+  it('gives a theme with a different accent hue its own category and size colors', () => {
+    const slate = dark('slate');
+    const nord = dark('nord');
+    expect(nord.category).not.toEqual(slate.category);
+    expect(nord.size).not.toEqual(slate.size);
+  });
+
+  it('answers the same theme with the same colors', () => {
+    expect(light('nord')).toEqual(light('nord'));
   });
 });

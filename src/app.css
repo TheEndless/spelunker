@@ -1,6 +1,6 @@
 /* Shared sizing. Colors below are designed separately for light and dark. */
 :root {
-  --radius: 6px;
+  --radius: 4px;
   --control-height: 30px;
   --tool-height: 26px;
   --text-small: 12px;
@@ -106,6 +106,14 @@ body {
   color: var(--text);
   font: 13px/1.4 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   overflow: hidden;
+  /* The window is an app, not a page: dragging across it must not paint its labels blue. The places
+     that hold text worth copying (the boxes, the preview's text and details, the skipped list) opt back in. */
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
 }
 
 button,

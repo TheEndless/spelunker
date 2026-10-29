@@ -2,7 +2,7 @@ import { channels, contrast, fromOklab, mix, normalizeHex, oklab, perceptualDist
 import type { Mode, Tokens } from './palettes';
 import { loneRidgeMeanBrightness, shadeChannel } from './treemapCushion';
 
-const CATEGORY_SATURATION = 0.7;
+const CATEGORY_SATURATION = 0.9;
 const FILL_CONTRAST = 3;
 const LABEL_CONTRAST = 4.5;
 
@@ -14,11 +14,20 @@ const LABEL_CONTRAST = 4.5;
  */
 const OTHER_HUE = 218;
 const OTHER_SATURATION = 0.14;
-/** Hue in degrees for each category, in FILE_CATEGORIES order. "Other" is the neutral above. */
-const CATEGORY_HUES = [212, 172, 78, 319, 14, 281, 247, 48, 192, 128, 345, 32, OTHER_HUE];
+/** The accent hue the category and size hue tables were written for (Slate's amber), so Slate keeps them as they are. */
+const REFERENCE_ACCENT_HUE = 36;
+/** The shares of the way to the accent's hue that the palette is tried at, in order. */
+const ACCENT_TURN_SHARES = [1, 0.75, 0.5, 0.25, 0];
+/** An accent or surface this gray has no hue worth following. */
+const MIN_HUE_SATURATION = 0.12;
+/** Hue in degrees for each category except the neutral Other, in FILE_CATEGORIES order. */
+const CATEGORY_HUES = [212, 172, 78, 319, 14, 281, 247, 48, 192, 128, 345, 32];
+/** Other comes last and has no hue of its own in the table. */
+const OTHER_INDEX = CATEGORY_HUES.length;
 /** Per-category lightness nudges, tuned so every pair stays at least 0.05 apart in OKLab after shading pulls dark-mode colors together. */
 const CATEGORY_LIGHTNESS_SHIFT = [0, 0.06, 0, 0.112, 0.014, 0.081, -0.046, 0, 0.06, -0.04, 0.028, 0.06, 0];
-const OTHER_INDEX = CATEGORY_HUES.length - 1;
+/** The size classes run cool to hot, small to huge, so the big files stand out as warm patches. */
+const SIZE_HUES = [225, 185, 130, 62, 28, 355];
 
 export const CATEGORY_LABELS: readonly string[] = [
   'Code', 'Text', 'Data', 'Images', 'PDF', 'Audio', 'Video', 'Archives', 'Documents', 'Spreadsheets', 'Slides', 'Programs', 'Other',
@@ -26,10 +35,13 @@ export const CATEGORY_LABELS: readonly string[] = [
 
 export const AGE_LABELS: readonly string[] = ['Today', 'This week', 'This month', 'This year', 'Older', 'Unknown'];
 
+export const SIZE_LABELS: readonly string[] = ['Under 16 KB', '16 KB to 256 KB', '256 KB to 4 MB', '4 MB to 64 MB', '64 MB to 1 GB', '1 GB or more'];
+
 export interface MapColors {
   background: string;
   category: string[];
   age: string[];
+  size: string[];
   outlineLight: string;
   outlineDark: string;
 }
@@ -80,7 +92,15 @@ function labelReadsOnMean(base: string): boolean {
   return contrast(labelColorOn(base, mean, mean), shadedMean(base)) >= LABEL_CONTRAST;
 }
 
-const SEARCH_STEPS = 100;
+const SEARCH_STEPS = 180;
+/** The smallest OKLab distance between two category (or two size) base colors. */
+const MIN_CATEGORY_DISTANCE = 0.05;
+/** How far, and in what steps, a fill's start lightness may move to get clear of the colors before it. */
+const NUDGE_LIGHTNESS = 0.01;
+const MAX_NUDGE_STEPS = 12;
+/** The same for the hue, tried only after the lightness alone could not do it. */
+const NUDGE_HUE_DEGREES = 6;
+const MAX_HUE_NUDGE_STEPS = 4;
 /** How far one search step moves a category's HSL lightness. */
 const CATEGORY_LIGHTNESS_STEP = 0.005;
 
@@ -121,25 +141,104 @@ function ensureFill(base: string, background: string, mode: Mode, carriesLabel: 
   return firstPassingFill((step) => mix(base, target, step / SEARCH_STEPS), background, carriesLabel);
 }
 
-export function mapColors(tokens: Tokens, mode: Mode): MapColors {
-  const background = normalizeHex(tokens.surface);
+/** The signed angle in degrees, between -180 and 180, to turn from hue `from` to hue `to` the short way round. */
+function shortestTurn(from: number, to: number): number {
+  return ((to - from + 540) % 360) - 180;
+}
+
+/** The hue of a color in degrees, or null when it is too gray to have one. */
+function hueOf(color: string): number | null {
+  const [red, green, blue] = channels(color).map((channel) => channel / 255);
+  const high = Math.max(red, green, blue);
+  const low = Math.min(red, green, blue);
+  const spread = high - low;
+  const lightness = (high + low) / 2;
+  const saturation = spread === 0 ? 0 : spread / (1 - Math.abs(2 * lightness - 1));
+  if (saturation < MIN_HUE_SATURATION) return null;
+  const sector = high === red ? ((green - blue) / spread) % 6 : high === green ? (blue - red) / spread + 2 : (red - green) / spread + 4;
+  return (sector * 60 + 360) % 360;
+}
+
+/**
+ * The category and size fills for hues turned by `hueShift` degrees, or null when some fill cannot
+ * be made to pass the contrast rules and stay apart from the fills before it. Raising HSL lightness
+ * keeps more of the hue's saturation than mixing toward white would.
+ */
+function turnedFills(hueShift: number, background: string, mode: Mode): { category: string[]; size: string[] } | null {
   // The light search starts high and darkens only until a fill passes, so light fills land just past
   // the 3:1 base rule (about 3.0 to 3.9:1) instead of far darker than the dark map's.
   const baseLightness = mode === 'dark' ? 0.6 : 0.72;
   const searchDirection = mode === 'dark' ? 1 : -1;
-  const category = CATEGORY_HUES.map((hue, index) => {
-    const saturation = index === OTHER_INDEX ? OTHER_SATURATION : CATEGORY_SATURATION;
-    const startLightness = baseLightness + CATEGORY_LIGHTNESS_SHIFT[index];
-    // Raising HSL lightness keeps more of the hue's saturation than mixing toward white would.
-    const fill = firstPassingFill(
-      (step) => hslToHex(hue, saturation, Math.min(1, Math.max(0, startLightness + searchDirection * step * CATEGORY_LIGHTNESS_STEP))),
-      background,
-      true,
-    );
-    if (fill === undefined) throw new Error(`No ${mode} fill for category ${CATEGORY_LABELS[index]} on ${background} reaches the contrast rules`);
-    return fill;
-  });
-  return { background, category, age: ageRamp(tokens.accent, background, mode), outlineLight: '#FFFFFF', outlineDark: '#000000' };
+  const turned = (hue: number) => (hue + hueShift + 360) % 360;
+
+  /**
+   * A fill of `hue` that passes the contrast rules and sits at least `MIN_CATEGORY_DISTANCE` from
+   * every color in `apart`. The start color is tried first, then the lightness is nudged both ways,
+   * and when that is not enough the hue is turned a little and the lightness tried again.
+   */
+  const fillOf = (hue: number, saturation: number, startLightness: number, apart: readonly string[]): string | undefined => {
+    for (let hueNudge = 0; hueNudge <= MAX_HUE_NUDGE_STEPS; hueNudge++) {
+      for (const hueDirection of hueNudge === 0 ? [0] : [1, -1]) {
+        const nudgedHue = (hue + hueDirection * hueNudge * NUDGE_HUE_DEGREES + 360) % 360;
+        for (let nudge = 0; nudge <= MAX_NUDGE_STEPS; nudge++) {
+          for (const direction of nudge === 0 ? [0] : [1, -1]) {
+            const lightness = startLightness + direction * nudge * NUDGE_LIGHTNESS;
+            const fill = firstPassingFill(
+              (step) => hslToHex(nudgedHue, saturation, Math.min(1, Math.max(0, lightness + searchDirection * step * CATEGORY_LIGHTNESS_STEP))),
+              background,
+              true,
+            );
+            if (fill !== undefined && apart.every((other) => perceptualDistance(fill, other) >= MIN_CATEGORY_DISTANCE)) return fill;
+          }
+        }
+      }
+    }
+    return undefined;
+  };
+
+  const category: string[] = [];
+  for (let index = 0; index < CATEGORY_LABELS.length; index++) {
+    const isOther = index === OTHER_INDEX;
+    const hue = isOther ? OTHER_HUE : turned(CATEGORY_HUES[index]);
+    const fill = fillOf(hue, isOther ? OTHER_SATURATION : CATEGORY_SATURATION, baseLightness + CATEGORY_LIGHTNESS_SHIFT[index], category);
+    if (fill === undefined) return null;
+    category.push(fill);
+  }
+  const size: string[] = [];
+  for (const hue of SIZE_HUES) {
+    const fill = fillOf(turned(hue), CATEGORY_SATURATION, baseLightness, size);
+    if (fill === undefined) return null;
+    size.push(fill);
+  }
+  return { category, size };
+}
+
+const mapColorsCache = new Map<string, MapColors>();
+
+/**
+ * The map's colors for a theme. The category and size hues turn toward the theme's accent hue, so
+ * each theme's map has its accent's family in it. Turning all the way can leave some light themes
+ * with hues that cannot be told apart once darkened enough to read, so the turn is tried at full,
+ * three quarters, half, a quarter, and none (the hues as first written, which always work), and the
+ * first that fits every color is used. A gray accent turns nothing. Other stays a cool neutral
+ * whatever the theme, since a warm gray shades to brown.
+ */
+export function mapColors(tokens: Tokens, mode: Mode): MapColors {
+  const cacheKey = `${mode}|${tokens.accent}|${tokens.surface}`;
+  const cached = mapColorsCache.get(cacheKey);
+  if (cached) return cached;
+  const background = normalizeHex(tokens.surface);
+  const accentHue = hueOf(tokens.accent);
+  const fullTurn = accentHue === null ? 0 : shortestTurn(REFERENCE_ACCENT_HUE, accentHue);
+  let fills: ReturnType<typeof turnedFills> = null;
+  for (const share of ACCENT_TURN_SHARES) {
+    fills = turnedFills(fullTurn * share, background, mode);
+    if (fills) break;
+  }
+  if (!fills) throw new Error(`No ${mode} category and size fills on ${background} reach the contrast and distance rules`);
+  const colors = { background, ...fills, age: ageRamp(tokens.accent, background, mode), outlineLight: '#FFFFFF', outlineDark: '#000000' };
+  mapColorsCache.set(cacheKey, colors);
+  return colors;
 }
 
 /**

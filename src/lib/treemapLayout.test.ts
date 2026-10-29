@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGE_BUCKET_COUNT, ageBucket, layoutTree, RectKind, type LayoutOptions } from './treemapLayout';
+import { AGE_BUCKET_COUNT, ageBucket, layoutTree, RectKind, sizeClass, type LayoutOptions } from './treemapLayout';
 import { addRidge, CUSHION_HEIGHT, CUSHION_SCALE } from './treemapCushion';
 import { FolderTree, type TreemapRecord } from './treemapTree';
 
@@ -187,6 +187,28 @@ describe('layoutTree', () => {
   });
 });
 
+describe('sizeClass', () => {
+  it('steps up by sixteen times, from under 16 KB to 1 GB or more', () => {
+    const KB = 1024;
+    expect([0, 16 * KB - 1].map(sizeClass)).toEqual([0, 0]);
+    expect([16 * KB, 256 * KB - 1].map(sizeClass)).toEqual([1, 1]);
+    expect([256 * KB, 4 * KB * KB - 1].map(sizeClass)).toEqual([2, 2]);
+    expect([4 * KB * KB, 64 * KB * KB - 1].map(sizeClass)).toEqual([3, 3]);
+    expect([64 * KB * KB, KB * KB * KB - 1].map(sizeClass)).toEqual([4, 4]);
+    expect([KB * KB * KB, 50 * KB * KB * KB].map(sizeClass)).toEqual([5, 5]);
+  });
+
+  it('colors a file rectangle and totals the weight by its class', () => {
+    const tree = treeOf([{ id: 1, folder: 'C:\a', size: 5 * 1024 * 1024 }, { id: 2, folder: 'C:\a', size: 100 }]);
+    const result = layout(tree, exact);
+    const rect = (id: number) => Array.from({ length: result.count }, (_, i) => i).find((i) => result.id[i] === id && result.kind[i] === RectKind.File)!;
+    expect(result.sizeClass[rect(1)]).toBe(3);
+    expect(result.sizeClass[rect(2)]).toBe(0);
+    expect(result.sizeWeight[3]).toBe(5 * 1024 * 1024);
+    expect(result.sizeWeight[0]).toBe(100);
+  });
+});
+
 describe('surface coefficients', () => {
   it('gives every rectangle four finite coefficients', () => {
     const tree = treeOf(Array.from({ length: 40 }, (_, i) => ({ id: i, folder: `C:\\d${i % 4}`, size: 1 + (i % 9) })));
@@ -201,6 +223,18 @@ describe('surface coefficients', () => {
     const expected = [0, 0, 0, 0];
     addRidge(expected, 0, result.x[0], result.y[0], result.x[0] + result.w[0], result.y[0] + result.h[0], CUSHION_HEIGHT * CUSHION_SCALE);
     for (let i = 0; i < 4; i++) expect(result.surface[i]).toBeCloseTo(expected[i], 4);
+  });
+
+  it('gives a tile too small for a bubble the surface of its folder, and a big tile its own ridge on top', () => {
+    const tree = treeOf([{ id: 1, folder: 'C:\a', size: 1_000_000 }, { id: 2, folder: 'C:\a', size: 100 }]);
+    const result = layout(tree, exact);
+    const rects = Array.from({ length: result.count }, (_, i) => i);
+    const big = rects.find((i) => result.id[i] === 1 && result.kind[i] === RectKind.File)!;
+    const group = rects.find((i) => result.id[i] === 2 && result.kind[i] === RectKind.File)!;
+    expect(Math.min(result.w[group], result.h[group])).toBeLessThan(4);
+    const folderSurface = [0, 1, 2, 3].map((k) => result.surface[big * 4 + k]);
+    addRidge(folderSurface, 0, result.x[big], result.y[big], result.x[big] + result.w[big], result.y[big] + result.h[big], -CUSHION_HEIGHT * CUSHION_SCALE ** (result.depth[big] + 1));
+    for (let k = 0; k < 4; k++) expect(result.surface[group * 4 + k]).toBeCloseTo(folderSurface[k], 4);
   });
 
   it("adds a nested file's own ridge on top of the ridges of every folder frame around it", () => {

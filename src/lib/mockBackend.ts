@@ -1,11 +1,14 @@
 // Stand-in backend for viewing the UI in a plain browser (`npm run dev`). Not used inside Tauri.
-import type { ErrorRow, FileText, PreviewLine, QueryOptions, ResultRow, SearchMessage } from './types';
+import type { ErrorRow, FileText, PreviewLine, QueryOptions, ResultRow, SearchMessage, UpdateInfo } from './types';
 import type { DragOutcome, SearchRequest } from './backend';
+import { DEMO_QUERY, demoPreview, demoRows } from './demoFixture';
 
 declare global {
   interface Window {
     /** A test seam: paths the mock reports as gone, so scripts can watch rows of vanished files go. */
     __spMockMissingPaths?: string[];
+    /** A test seam: what the update check finds. A string makes the check fail with that sentence. */
+    __spMockUpdate?: UpdateInfo | string;
   }
 }
 
@@ -102,15 +105,22 @@ const SKIPPED_FILES: ErrorRow[] = Array.from({ length: 46 }, (_, index) => ({
   message: 'Access is denied. (os error 5)',
 }));
 
+/** True when the search text asks for the invented documents folder in demoFixture.ts. */
+const isDemoQuery = (text: string): boolean => text.trim().toLowerCase() === DEMO_QUERY;
+
 /**
  * Typing "many" in the text box streams 100,000 rows so scrolling can be judged by eye. "deep"
- * streams 100,000 rows in a deep, uneven folder tree, the fair test for the results map.
+ * streams 100,000 rows in a deep, uneven folder tree, the fair test for the results map. "invoice"
+ * streams a few hundred rows of an invented documents folder, which the README screenshot shows.
  */
 export function startSearch(request: SearchRequest, onMessage: (message: SearchMessage) => void) {
   cancelled = false;
-  const total = ['many', 'slow', 'deep'].includes(request.query.text) ? 100_000 : 400;
+  const demo = isDemoQuery(request.query.text) ? demoRows() : null;
+  const total = demo ? demo.length : ['many', 'slow', 'deep'].includes(request.query.text) ? 100_000 : 400;
   const withHits = request.query.text !== '';
-  const makeRow = request.query.text === 'deep' ? deepRow : (index: number) => fakeRow(index, withHits);
+  const makeRow = demo ? (index: number) => demo[index] : request.query.text === 'deep' ? deepRow : (index: number) => fakeRow(index, withHits);
+  // The invented folder is a clean one: nothing was unreadable and nothing was binary.
+  const skippedFiles = demo ? [] : SKIPPED_FILES;
   const batchSize = Math.max(50, Math.floor(total / 40));
   let produced = 0;
   const started = performance.now();
@@ -123,8 +133,8 @@ export function startSearch(request: SearchRequest, onMessage: (message: SearchM
         filesScanned: produced * 3,
         filesMatched: produced,
         totalHits: produced * 3,
-        errors: SKIPPED_FILES.length,
-        binarySkipped: 4,
+        errors: skippedFiles.length,
+        binarySkipped: demo ? 0 : 4,
         elapsedMs: Math.round(performance.now() - started),
         cancelled,
       },
@@ -147,8 +157,10 @@ export function startSearch(request: SearchRequest, onMessage: (message: SearchM
       rows.push(makeRow(produced++));
     }
     // The skipped files arrive with the first batch, like the first locked folders a real walk meets.
-    const errors = produced === rows.length ? SKIPPED_FILES : [];
-    onMessage({ kind: 'batch', rows, errors, filesScanned: produced * 3 });
+    const errors = produced === rows.length ? skippedFiles : [];
+    // The last row of the batch says where the walk is, as the real progress report does.
+    const lastPath = rows.at(-1)?.path ?? '';
+    onMessage({ kind: 'batch', rows, errors, filesScanned: produced * 3, folder: lastPath.replace(/[\\/][^\\/]*$/, '') || null });
     setTimeout(step, 50);
   };
   step();
@@ -159,6 +171,7 @@ export function stopSearch() {
 }
 
 export function previewFile(_path: string, query: QueryOptions, contextLines: number): PreviewLine[] {
+  if (isDemoQuery(query.text)) return demoPreview(contextLines);
   const lines: PreviewLine[] = [];
   const needle = query.text || 'needle';
   const matchLines = [12, 13, 40];
@@ -192,6 +205,18 @@ function describeRegexError(pattern: string): string | null {
 
 export function validateContent(query: QueryOptions): string | null {
   return query.regex ? describeRegexError(query.text) : null;
+}
+
+/** The browser has no drives, so the mock pretends to have two. */
+/** Finds no newer release, unless a script says otherwise in `window.__spMockUpdate`. */
+export async function checkForUpdates(): Promise<UpdateInfo> {
+  const scripted = window.__spMockUpdate;
+  if (typeof scripted === 'string') throw scripted;
+  return scripted ?? { current: 'development', latest: 'development', available: false, page: '', published: null };
+}
+
+export function thisPcLabel(): string {
+  return 'This PC (C:, D:)';
 }
 
 export function validateNameRegex(pattern: string): string | null {
@@ -241,6 +266,7 @@ export function saveSavedSearches(json: string) {
 }
 
 export function readFileText(_path: string, query: QueryOptions | null): FileText {
+  if (query && isDemoQuery(query.text)) return { lines: demoPreview(Number.MAX_SAFE_INTEGER), truncated: false, binary: false };
   const needle = query?.text || '';
   const lines: PreviewLine[] = Array.from({ length: 60 }, (_, index) => {
     const lineNumber = index + 1;

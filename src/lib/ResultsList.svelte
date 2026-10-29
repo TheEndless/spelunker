@@ -2,18 +2,16 @@
   import { onMount, tick, untrack, type Snippet } from 'svelte';
   import {
     COLUMN_DEFINITIONS,
-    COLUMN_IDS,
+    defaultLayout,
     MAX_COLUMN_WIDTH,
     MIN_COLUMN_WIDTH,
+    MIN_PANE_WIDTH,
     moveColumnBefore,
     moveColumnByStep,
-    growToFill,
-    resetWidths,
     resizeColumn,
-    scaleToFill,
-    shrinkToFit,
     toggleColumn,
     visibleColumns,
+    widthsInPane,
     type ColumnId,
     type ColumnLayout,
   } from './columnLayout';
@@ -116,7 +114,7 @@
       id,
       label: COLUMN_DEFINITIONS[id].label,
       align: COLUMN_DEFINITIONS[id].align,
-      width: layout.widths[id],
+      width: shownWidths[id],
     })),
   );
 
@@ -147,6 +145,12 @@
   const totalWidth = $derived(columns.reduce((sum, column) => sum + column.width, 0));
   /** The room the columns share: the pane, less the row's left edge and the corner button. */
   const availableWidth = $derived(scrollerClientWidth - ROW_EDGE - CORNER_WIDTH);
+  /**
+   * The widths the columns have on screen: the saved ones, made to fill the pane. They are worked
+   * out again for every pane size and never saved, so a narrow window leaves nothing squeezed
+   * behind it when the window widens again.
+   */
+  const shownWidths = $derived(widthsInPane(layout.widths, visibleColumns(layout), availableWidth));
   const scrollbarWidth = $derived(Math.max(0, scrollerWidth - scrollerClientWidth));
   const scrollWindow = $derived(
     visibleWindow({
@@ -195,7 +199,7 @@
    * still fill the pane, and automatic content fitting is switched off since the user took over.
    * `from` is the widths when a drag began, so each pointer move is worked out from the same start.
    */
-  function resizeTo(id: ColumnId, width: number, from: Record<ColumnId, number> = layout.widths) {
+  function resizeTo(id: ColumnId, width: number, from: Record<ColumnId, number> = shownWidths) {
     onLayout({ ...layout, widths: resizeColumn(from, visibleColumns(layout), id, width), autoSize: false });
   }
 
@@ -222,7 +226,7 @@
     event.stopPropagation();
     const startX = event.clientX;
     const startWidth = column.width;
-    const startWidths = { ...layout.widths };
+    const startWidths = { ...shownWidths };
     trackPointer((moveEvent) => resizeTo(column.id, startWidth + moveEvent.clientX - startX, startWidths));
   }
 
@@ -246,50 +250,37 @@
     if (width !== null) resizeTo(column.id, width);
   }
 
-  /** Fits every column, as a single change so the layout is saved once. */
+  /** Fits every column to the rows in view, as a single change so the layout is saved once. */
   function fitAllColumns({ automatic }: { automatic: boolean }) {
     const fitted = { ...layout.widths };
     for (const column of columns) {
       const width = widthToFit(column);
       if (width !== null) fitted[column.id] = width;
     }
-    // Fill the pane exactly: the least important columns give way when it is too narrow, and Folder
-    // takes up the room when it is wide.
-    const visible = visibleColumns(layout);
-    applyWidths(growToFill(shrinkToFit(fitted, visible, availableWidth), visible, availableWidth), automatic);
+    applyWidths(fitted, automatic);
   }
 
   /** Saves a new set of widths, unless they are what is already there, which is most fits while a search runs. */
-  function applyWidths(widths: Record<ColumnId, number>, autoSize = layout.autoSize) {
+  function applyWidths(widths: Record<ColumnId, number>, autoSize: boolean) {
     const unchanged = visibleColumns(layout).every((id) => widths[id] === layout.widths[id]);
     if (unchanged && autoSize === layout.autoSize) return;
     onLayout({ ...layout, widths, autoSize });
   }
 
-  // While automatic sizing is on, columns keep fitting. They fit as results start arriving and
-  // while a search runs, when it finishes, and whenever the pane changes size (the window, the
-  // splitter, the preview hiding) or a column is shown or hidden.
+  // While automatic sizing is on, the columns are fitted to the rows in view when results start
+  // arriving, while a search runs, when it finishes, and when a column is shown or hidden or the
+  // pane is first measured. Otherwise the saved widths stand, whatever the results.
   const visibleKey = $derived(visibleColumns(layout).join(','));
   let refitTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** Keeps the columns exactly filling the pane after the user has sized some by hand. */
-  function fillPane() {
-    applyWidths(scaleToFill(layout.widths, visibleColumns(layout), availableWidth));
-  }
-
-  /** Brings the columns in line with the pane: fitted to content when automatic, rescaled otherwise. */
   function refitSoon(delay = 60) {
     clearTimeout(refitTimer);
     refitTimer = setTimeout(() => {
-      // Before the pane has been measured there is nothing sensible to fit to.
-      if (!measureText || availableWidth < 200) return;
-      if (layout.autoSize) fitAllColumns({ automatic: true });
-      else fillPane();
+      if (layout.autoSize && measureText && availableWidth >= MIN_PANE_WIDTH) fitAllColumns({ automatic: true });
     }, delay);
   }
 
   $effect(() => {
-    void scrollerClientWidth;
     void visibleKey;
     void measureText;
     untrack(() => refitSoon());
@@ -297,9 +288,9 @@
   });
 
   $effect(() => {
-    if (!running) return;
+    if (!running || !layout.autoSize) return;
     const interval = setInterval(() => {
-      if (layout.autoSize && rows.length > 0) fitAllColumns({ automatic: true });
+      if (rows.length > 0) fitAllColumns({ automatic: true });
     }, 1200);
     return () => clearInterval(interval);
   });
@@ -629,10 +620,6 @@
     return `${sortNote}Sort by ${column.label}. Drag to move. Ctrl+Left or Ctrl+Right resizes, Ctrl+Enter fits, Alt+Shift+Left or Right moves.`;
   }
 
-  function resetColumns(): ColumnLayout {
-    return resetWidths({ ...layout, order: [...COLUMN_IDS], hidden: [] });
-  }
-
   /** Every column in the user's order, hidden ones included, so the chooser mirrors the grid. */
   const columnMenuItems = $derived([
     ...layout.order.map((id) => ({
@@ -649,7 +636,7 @@
       action: () => (layout.autoSize ? onLayout({ ...layout, autoSize: false }) : fitAllColumns({ automatic: true })),
     },
     { label: 'Fit columns to content now', action: () => fitAllColumns({ automatic: false }) },
-    { label: 'Reset columns', action: () => onLayout(resetColumns()) },
+    { label: 'Reset columns', action: () => onLayout(defaultLayout()) },
   ]);
 </script>
 
@@ -812,6 +799,10 @@
   .scroller {
     height: 100%;
     overflow: auto;
+    /* The scroll bar's room is kept from the start. When one appears later the element's box does not
+       change, so the size observers say nothing and the corner button, which sits beside the bar by
+       its measured width, would end up on top of it. */
+    scrollbar-gutter: stable;
     background: var(--surface);
     position: relative;
   }

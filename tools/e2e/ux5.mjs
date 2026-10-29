@@ -1,4 +1,4 @@
-// Real-window checks for searching every drive: the toggle in the app, a real all-drives search,
+// Real-window checks for searching every drive: the This PC choice in the Look in list, a real all-drives search,
 // and the launch with "This PC" that Explorer's This PC menu entry makes.
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -16,33 +16,17 @@ await send('Page.reload');
 await sleep(2500);
 await ev(PAGE_HELPERS);
 
-// ---- the toggle
-const toggle = `document.querySelector('button[aria-label="Search all drives"]')`;
-check('a one-click "all drives" button sits next to Browse', await ev(`!!${toggle}`));
-check('it starts off', (await ev(`${toggle}.getAttribute('aria-pressed')`)) === 'false');
-await setField('[role=combobox]', 'D:\\Development\\ai\\spelunker\\docs');
-await ev(`${toggle}.click()`);
-await sleep(200);
-check('pressing it fills Look in with "This PC (all drives)"', (await lookIn()) === 'This PC (all drives)', await lookIn());
-check('and shows as pressed', (await ev(`${toggle}.getAttribute('aria-pressed')`)) === 'true');
-await ev(`${toggle}.click()`);
-await sleep(200);
-check('pressing it again puts the previous folders back', (await lookIn()) === 'D:\\Development\\ai\\spelunker\\docs', await lookIn());
-
-// ---- typing the words works too, and the list offers it
-await setField('[role=combobox]', 'this pc');
-await sleep(200);
-check('typing "this pc" is recognised as all drives', (await ev(`${toggle}.getAttribute('aria-pressed')`)) === 'true');
+// ---- there is no separate button: This PC is a choice in the folder dialog and in the Look in list
+check('there is no separate all-drives button', await ev(`!document.querySelector('button[aria-label="Search all drives"]')`));
 await setField('[role=combobox]', '');
 await ev(`document.querySelector('[role=combobox]').focus()`);
 await ev(`document.querySelector('[role=combobox]').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))`);
 await sleep(300);
 const offered = await ev(`[...document.querySelectorAll('[role=option]')].map((o) => o.innerText.trim())`);
-check('the Look in list offers it first', offered[0] === 'This PC (all drives)', offered);
+check('the Look in list offers This PC with the drive letters first', /^This PC \([A-Z]:(, [A-Z]:)*\)$/.test(offered[0]), offered);
 
 // ---- a real search over every drive, by file name, stopped once it has found things on two drives
-await ev(`${toggle}.getAttribute('aria-pressed') === 'true' || ${toggle}.click()`);
-await setField('[role=combobox]', 'This PC (all drives)');
+await setField('[role=combobox]', offered[0]);
 await setField('input[title^="Name"]', 'Cargo.toml; hosts');
 await sleep(200);
 await ev(`document.querySelector('button.go').click()`);

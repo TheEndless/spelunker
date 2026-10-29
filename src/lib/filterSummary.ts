@@ -1,7 +1,7 @@
 import type { Criteria } from './criteria';
 import { emptyDateFilter, emptySizeFilter, type DateFilter, type DateUnit, type SizeFilter } from './filters';
 
-export type FilterId = 'size' | 'modified' | 'created' | 'nameRegex' | 'multiLine';
+export type FilterId = 'size' | 'modified' | 'created' | 'multiLine';
 
 export interface FilterSummaryItem {
   id: FilterId;
@@ -56,12 +56,11 @@ export function summarizeFilters(criteria: Criteria): FilterSummaryItem[] {
   if (criteria.created.mode !== 'any') {
     items.push({ id: 'created', label: describeDate('Created', criteria.created) });
   }
-  if (criteria.nameIsRegex) items.push({ id: 'nameRegex', label: 'Name is a regex' });
   if (criteria.multiLine) items.push({ id: 'multiLine', label: 'Multi-line' });
   return items;
 }
 
-const FILTER_IDS: readonly FilterId[] = ['size', 'modified', 'created', 'nameRegex', 'multiLine'];
+const FILTER_IDS: readonly FilterId[] = ['size', 'modified', 'created', 'multiLine'];
 
 /** Returns new criteria with only the given filter switched off and its inputs reset. */
 export function clearFilter(criteria: Criteria, id: FilterId): Criteria {
@@ -81,9 +80,6 @@ export function clearFilter(criteria: Criteria, id: FilterId): Criteria {
       break;
     case 'created':
       cleared.created = emptyDateFilter();
-      break;
-    case 'nameRegex':
-      cleared.nameIsRegex = false;
       break;
     case 'multiLine':
       cleared.multiLine = false;

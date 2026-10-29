@@ -33,7 +33,7 @@ export interface Summary {
 }
 
 export type SearchMessage =
-  | { kind: 'batch'; rows: ResultRow[]; errors: ErrorRow[]; filesScanned: number | null }
+  | { kind: 'batch'; rows: ResultRow[]; errors: ErrorRow[]; filesScanned: number | null; folder: string | null }
   | { kind: 'done'; summary: Summary | null; error: string | null };
 
 export interface MatchRange {
@@ -59,6 +59,20 @@ export interface QueryOptions {
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type SortColumn = 'name' | 'folder' | 'hits' | 'size' | 'modified' | 'type';
 export type SortDirection = 'asc' | 'desc';
+
+/** What a check for a newer release found. */
+export interface UpdateInfo {
+  /** The version of this app. */
+  current: string;
+  /** The version of the newest release. */
+  latest: string;
+  /** True when `latest` is newer than `current`. */
+  available: boolean;
+  /** The page of that release, which is what Download opens. */
+  page: string;
+  /** When it was published, as GitHub writes it. */
+  published: string | null;
+}
 
 /** A whole text file for the preview, with lines that match the search flagged. */
 export interface FileText {

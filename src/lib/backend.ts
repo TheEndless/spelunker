@@ -1,7 +1,8 @@
 import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
+import type { EditorLaunch } from './editors';
 import { createSelfDropFilter, OutgoingPaths, type FolderDropEvent } from './fileDrag';
 import type { MillisRange } from './filters';
-import type { FileText, PreviewLine, QueryOptions, SearchMessage } from './types';
+import type { FileText, PreviewLine, QueryOptions, SearchMessage, UpdateInfo } from './types';
 
 export interface SearchRequest {
   roots: string[];
@@ -115,11 +116,30 @@ function folderDropHandler(
   };
 }
 
+/**
+ * The folder the user picks in the native dialog, or null when they cancel. Choosing This PC gives
+ * its label with the drive letters, since it is not a folder with a path.
+ */
 export async function pickFolder(): Promise<string | null> {
   if (!insideTauri) return null;
-  const { open } = await import('@tauri-apps/plugin-dialog');
-  const chosen = await open({ directory: true, multiple: false });
-  return typeof chosen === 'string' ? chosen : null;
+  return invoke<string | null>('pick_folder');
+}
+
+/**
+ * A URL for the system's icon for files ending in `extension` (without the dot), the larger one a
+ * card shows when `large`, or null when there is none, or in a plain browser, which has no system
+ * icons to ask for.
+ */
+export async function fileIconUrl(extension: string, large: boolean): Promise<string | null> {
+  if (!insideTauri) return null;
+  const png = await invoke<ArrayBuffer>('file_icon', { extension, large });
+  return png.byteLength === 0 ? null : URL.createObjectURL(new Blob([png], { type: 'image/png' }));
+}
+
+/** What Look in shows for This PC: its name and the letters of the local drives, such as "This PC (C:, D:)". */
+export async function thisPcLabel(): Promise<string> {
+  if (!insideTauri) return (await mock()).thisPcLabel();
+  return invoke<string>('this_pc_label');
 }
 
 /** The regex engine's complaint about a content query, or null when it is valid. */
@@ -176,21 +196,20 @@ export async function existingPaths(paths: string[]): Promise<string[]> {
   return invoke<string[]>('existing_paths', { paths });
 }
 
-/** Opens a file in the editor chosen in Settings, at a line. Without a command it opens normally. */
-export async function openInEditor(template: string | null, path: string, line: number): Promise<void> {
+/** Opens a file in the editor chosen in Settings, at a line. Without a launch it opens normally. */
+export async function openInEditor(launch: EditorLaunch | null, path: string, line: number): Promise<void> {
   if (!insideTauri) return;
-  if (template === null) await invoke('open_path', { path });
-  else await invoke('open_in_editor', { template, path, line });
+  if (launch === null) await invoke('open_path', { path });
+  else await invoke('open_in_editor', { editor: launch.editor, customTemplate: launch.customTemplate, path, line });
 }
 
-/** Asks where to save, and writes `content` there. Resolves to false when the user cancels. */
+/**
+ * Asks where to save, and writes `content` there. Resolves to false when the user cancels. The
+ * backend shows the dialog and writes the file, so the page never names the place it writes to.
+ */
 export async function saveTextFile(suggestedName: string, extension: string, content: string): Promise<boolean> {
   if (!insideTauri) return false;
-  const { save } = await import('@tauri-apps/plugin-dialog');
-  const target = await save({ defaultPath: suggestedName, filters: [{ name: extension.toUpperCase(), extensions: [extension] }] });
-  if (!target) return false;
-  await invoke('write_text_file', { path: target, content });
-  return true;
+  return invoke<boolean>('save_text_file', { suggestedName, extension, content });
 }
 
 export async function shellIntegrationEnabled(): Promise<boolean> {
@@ -323,6 +342,24 @@ export const hasShellMenu = insideTauri;
  * Puts text on the clipboard. Inside the app this goes through the system directly, because the
  * webview's own clipboard needs the window to have focus, and a native menu has just taken it.
  */
+/** The version of the app, as its build says. A plain browser has no build to ask. */
+export async function appVersion(): Promise<string> {
+  if (!insideTauri) return 'development';
+  const { getVersion } = await import('@tauri-apps/api/app');
+  return getVersion();
+}
+
+/** Asks GitHub whether a newer release exists. Rejects with a sentence saying why it could not tell. */
+export async function checkForUpdates(): Promise<UpdateInfo> {
+  if (!insideTauri) return (await mock()).checkForUpdates();
+  return invoke<UpdateInfo>('check_for_updates');
+}
+
+/** Opens a release page in the browser. The backend refuses any address that is not one of this project's. */
+export async function openReleasePage(address: string): Promise<void> {
+  if (insideTauri) await invoke('open_release_page', { address });
+}
+
 export async function copyText(text: string): Promise<void> {
   if (insideTauri) {
     const { writeText } = await import('@tauri-apps/plugin-clipboard-manager');

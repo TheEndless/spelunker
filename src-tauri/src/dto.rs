@@ -190,6 +190,8 @@ pub enum SearchMessage {
         rows: Vec<ResultRow>,
         errors: Vec<ErrorRow>,
         files_scanned: Option<u64>,
+        /// The folder the walk was in at the latest progress report, which comes with `files_scanned`.
+        folder: Option<String>,
     },
     /// `error` is set instead of `summary` when the search could not start (bad pattern).
     Done {

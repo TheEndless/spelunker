@@ -4,11 +4,21 @@
 use std::io::Read;
 use std::path::Path;
 
-/// A PDF's header must appear in its first 1024 bytes (the format's own rule).
+/// How much of the start of a file is read to look for the PDF header.
 const PDF_HEADER_WINDOW: usize = 1024;
 
+/// Whether the file begins with the PDF header, after nothing but a byte order mark and blank
+/// space. The format allows other bytes first, but a page that begins with markup and hides the
+/// marker in a comment would pass that looser test and could then be served as HTML, so a file
+/// with anything else in front of the marker is not treated as a PDF.
 fn has_pdf_header(start: &[u8]) -> bool {
-    start.windows(5).any(|window| window == b"%PDF-")
+    const BYTE_ORDER_MARK: &[u8] = b"\xEF\xBB\xBF";
+    let without_mark = start.strip_prefix(BYTE_ORDER_MARK).unwrap_or(start);
+    let first_content = without_mark
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(without_mark.len());
+    without_mark[first_content..].starts_with(b"%PDF-")
 }
 
 /// Checks that `path` is a file that is safe to show. A file named `.pdf` has to be a real PDF:
@@ -78,6 +88,37 @@ mod tests {
         content.extend_from_slice(b"%PDF-1.4");
         let path = write(folder.path(), "a.pdf", &content);
         assert!(verify_previewable(&path).is_ok());
+    }
+
+    #[test]
+    fn a_pdf_with_a_byte_order_mark_first_is_allowed() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = write(folder.path(), "a.pdf", b"\xEF\xBB\xBF%PDF-1.7");
+        assert!(verify_previewable(&path).is_ok());
+    }
+
+    #[test]
+    fn markup_with_the_marker_hidden_in_a_comment_is_not_a_pdf() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = write(
+            folder.path(),
+            "poly.pdf",
+            b"<html><script>document.title='x'</script><!-- %PDF-1.4 -->",
+        );
+        assert!(verify_previewable(&path).is_err());
+    }
+
+    #[test]
+    fn any_other_byte_in_front_of_the_header_is_refused() {
+        let folder = tempfile::tempdir().unwrap();
+        for (name, content) in [
+            ("a.pdf", &b"x%PDF-1.4"[..]),
+            ("b.pdf", &b"<!%PDF-1.4"[..]),
+            ("c.pdf", &b"\x00%PDF-1.4"[..]),
+        ] {
+            let path = write(folder.path(), name, content);
+            assert!(verify_previewable(&path).is_err(), "{name}");
+        }
     }
 
     #[test]

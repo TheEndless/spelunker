@@ -18,7 +18,6 @@ function everythingOn(): Criteria {
   criteria.size = { ...emptySizeFilter(), mode: 'larger', value: '1', unit: 'MB' };
   criteria.modified = { ...emptyDateFilter(), mode: 'within', amount: '7', unit: 'days' };
   criteria.created = { ...emptyDateFilter(), mode: 'before', date: '2026-01-01' };
-  criteria.nameIsRegex = true;
   criteria.multiLine = true;
   return criteria;
 }
@@ -165,8 +164,8 @@ describe('summarizeFilters', () => {
     });
   });
 
-  it('describes the name regex and multi-line flags', () => {
-    expect(labelsFor((c) => (c.nameIsRegex = true))).toEqual(['Name is a regex']);
+  it('describes the multi-line flag, and leaves the name regex out since it is a field option', () => {
+    expect(labelsFor((c) => (c.nameIsRegex = true))).toEqual([]);
     expect(labelsFor((c) => (c.multiLine = true))).toEqual(['Multi-line']);
   });
 
@@ -174,14 +173,13 @@ describe('summarizeFilters', () => {
     expect(labelsFor((c) => (c.size = { ...c.size, mode: 'any', value: '5' }))).toEqual([]);
   });
 
-  it('keeps the order size, modified, created, name regex, multi-line', () => {
+  it('keeps the order size, modified, created, multi-line', () => {
     const items = summarizeFilters(everythingOn());
-    expect(items.map((item) => item.id)).toEqual(['size', 'modified', 'created', 'nameRegex', 'multiLine']);
+    expect(items.map((item) => item.id)).toEqual(['size', 'modified', 'created', 'multiLine']);
     expect(items.map((item) => item.label)).toEqual([
       'Size over 1 MB',
       'Modified in the last 7 days',
       'Created before 2026-01-01',
-      'Name is a regex',
       'Multi-line',
     ]);
   });
@@ -195,7 +193,7 @@ describe('summarizeFilters', () => {
 });
 
 describe('clearFilter', () => {
-  const ids: FilterId[] = ['size', 'modified', 'created', 'nameRegex', 'multiLine'];
+  const ids: FilterId[] = ['size', 'modified', 'created', 'multiLine'];
 
   it('resets size only', () => {
     const cleared = clearFilter(everythingOn(), 'size');
@@ -203,7 +201,6 @@ describe('clearFilter', () => {
     expect(summarizeFilters(cleared).map((item) => item.id)).toEqual([
       'modified',
       'created',
-      'nameRegex',
       'multiLine',
     ]);
   });
@@ -214,7 +211,6 @@ describe('clearFilter', () => {
     expect(summarizeFilters(cleared).map((item) => item.id)).toEqual([
       'size',
       'created',
-      'nameRegex',
       'multiLine',
     ]);
   });
@@ -225,18 +221,6 @@ describe('clearFilter', () => {
     expect(summarizeFilters(cleared).map((item) => item.id)).toEqual([
       'size',
       'modified',
-      'nameRegex',
-      'multiLine',
-    ]);
-  });
-
-  it('resets nameRegex only', () => {
-    const cleared = clearFilter(everythingOn(), 'nameRegex');
-    expect(cleared.nameIsRegex).toBe(false);
-    expect(summarizeFilters(cleared).map((item) => item.id)).toEqual([
-      'size',
-      'modified',
-      'created',
       'multiLine',
     ]);
   });
@@ -248,7 +232,6 @@ describe('clearFilter', () => {
       'size',
       'modified',
       'created',
-      'nameRegex',
     ]);
   });
 
@@ -279,7 +262,7 @@ describe('clearFilter', () => {
 
   it('does not share nested filter objects with the input', () => {
     const criteria = everythingOn();
-    const cleared = clearFilter(criteria, 'nameRegex');
+    const cleared = clearFilter(criteria, 'multiLine');
     expect(cleared.size).not.toBe(criteria.size);
     expect(cleared.modified).not.toBe(criteria.modified);
     expect(cleared.created).not.toBe(criteria.created);
@@ -287,13 +270,12 @@ describe('clearFilter', () => {
 });
 
 describe('clearAllFilters', () => {
-  it('resets all five filters', () => {
+  it('resets all four filters', () => {
     const cleared = clearAllFilters(everythingOn());
     expect(summarizeFilters(cleared)).toEqual([]);
     expect(cleared.size).toEqual(emptySizeFilter());
     expect(cleared.modified).toEqual(emptyDateFilter());
     expect(cleared.created).toEqual(emptyDateFilter());
-    expect(cleared.nameIsRegex).toBe(false);
     expect(cleared.multiLine).toBe(false);
   });
 

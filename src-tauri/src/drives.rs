@@ -6,22 +6,66 @@ const ALL_DRIVES_NAMES: [&str; 4] = ["this pc", "all drives", "this pc (all driv
 /// What the Look in box shows when every local drive is searched. The UI offers it as a choice.
 pub const ALL_DRIVES_LABEL: &str = "This PC (all drives)";
 
-pub fn is_all_drives(root: &str) -> bool {
-    let normalized = root.trim().to_lowercase();
-    ALL_DRIVES_NAMES.contains(&normalized.as_str())
+/// What a "This PC" entry stands for.
+enum ThisPc {
+    /// Every local fixed drive, as they are when the search starts.
+    EveryFixedDrive,
+    /// The drives the entry lists, such as `This PC (C:, D:)`, as roots like `C:\`.
+    Drives(Vec<String>),
 }
 
-/// Replaces each "This PC" style entry with the drives in `drives`, keeping the other roots as
-/// they are. Repeats are left for `roots::tidy_roots`, which handles them along with nested folders.
+/// `d:` as the root `D:\`, or None for anything that is not a drive letter and a colon.
+fn drive_root(text: &str) -> Option<String> {
+    match text.as_bytes() {
+        [letter, b':'] if letter.is_ascii_alphabetic() => {
+            Some(format!("{}:\\", letter.to_ascii_uppercase() as char))
+        }
+        _ => None,
+    }
+}
+
+fn parse_this_pc(root: &str) -> Option<ThisPc> {
+    let normalized = root.trim().to_lowercase();
+    if ALL_DRIVES_NAMES.contains(&normalized.as_str()) {
+        return Some(ThisPc::EveryFixedDrive);
+    }
+    let listed = normalized.strip_prefix("this pc (")?.strip_suffix(')')?;
+    let drives: Option<Vec<String>> = listed
+        .split(',')
+        .map(|part| drive_root(part.trim()))
+        .collect();
+    drives.map(ThisPc::Drives)
+}
+
+/// True for the words that mean every drive, and for `This PC` followed by a list of drive letters
+/// in parentheses, which is what the Look in box shows after choosing This PC.
+pub fn is_all_drives(root: &str) -> bool {
+    parse_this_pc(root).is_some()
+}
+
+/// What the Look in box shows for these drives: `This PC (C:, D:)`, or just `This PC` with none.
+pub fn this_pc_label(drives: &[String]) -> String {
+    let letters: Vec<&str> = drives
+        .iter()
+        .map(|drive| drive.trim_end_matches('\\'))
+        .collect();
+    if letters.is_empty() {
+        "This PC".to_string()
+    } else {
+        format!("This PC ({})", letters.join(", "))
+    }
+}
+
+/// Replaces each "This PC" style entry with its drives, keeping the other roots as they are. A
+/// plain entry means every drive in `drives`, and one that lists letters means exactly those.
+/// Repeats are left for `roots::tidy_roots`, which handles them along with nested folders.
 pub fn expand_roots(roots: Vec<String>, drives: &[String]) -> Vec<String> {
     roots
         .into_iter()
-        .flat_map(|root| {
-            if is_all_drives(&root) {
-                drives.to_vec()
-            } else {
-                vec![root]
-            }
+        .flat_map(|root| match parse_this_pc(&root) {
+            Some(ThisPc::EveryFixedDrive) => drives.to_vec(),
+            Some(ThisPc::Drives(listed)) => listed,
+            None => vec![root],
         })
         .collect()
 }
@@ -59,6 +103,36 @@ mod tests {
         assert!(is_all_drives("THIS PC (All Drives)"));
         assert!(!is_all_drives("C:\\"));
         assert!(!is_all_drives("This PC Games"));
+    }
+
+    /// The same cases as `isAllDrives` in src/lib/folderCombo.test.ts.
+    #[test]
+    fn a_this_pc_entry_may_list_the_drives_it_stands_for() {
+        assert!(is_all_drives("This PC (C:, D:, E:)"));
+        assert!(is_all_drives("this pc (d:)"));
+        assert!(is_all_drives(" THIS PC (C:,D:) "));
+        assert!(!is_all_drives("This PC ()"));
+        assert!(!is_all_drives("This PC (C:\\Games)"));
+        assert!(!is_all_drives("This PC (C:, Games)"));
+        assert!(!is_all_drives("This PC (D:) extra"));
+    }
+
+    #[test]
+    fn a_listed_this_pc_is_exactly_those_drives() {
+        let roots = expand_roots(vec!["This PC (E:, c:)".into()], &drives());
+        assert_eq!(roots, ["E:\\", "C:\\"]);
+    }
+
+    #[test]
+    fn the_label_lists_the_drive_letters() {
+        assert_eq!(this_pc_label(&drives()), "This PC (C:, D:)");
+        assert_eq!(this_pc_label(&[]), "This PC");
+    }
+
+    #[test]
+    fn the_label_it_makes_expands_back_to_the_same_drives() {
+        let roots = expand_roots(vec![this_pc_label(&drives())], &["Z:\\".to_string()]);
+        assert_eq!(roots, drives());
     }
 
     #[test]

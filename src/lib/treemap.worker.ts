@@ -1,7 +1,6 @@
 // No `/// <reference lib="webworker" />` here: a triple-slash lib reference applies to the whole
 // program, and the webworker lib redeclares DOM globals (`self`, `onmessage`, `postMessage`). The
 // DOM lib already declares OffscreenCanvas and performance, so only the scope needs a type.
-import { bestTextOn } from './colors';
 import { layoutTree, RectKind, type Layout, type Metric } from './treemapLayout';
 import type { Crumb, FromWorker, ToWorker, ViewSettings } from './treemapMessages';
 import { paintMap, type PaintStyle } from './treemapPaint';
@@ -38,7 +37,7 @@ function trim(layout: Layout): Layout {
     ...layout,
     x: layout.x.slice(0, count), y: layout.y.slice(0, count), w: layout.w.slice(0, count), h: layout.h.slice(0, count),
     id: layout.id.slice(0, count), kind: layout.kind.slice(0, count), depth: layout.depth.slice(0, count),
-    category: layout.category.slice(0, count), age: layout.age.slice(0, count), weight: layout.weight.slice(0, count),
+    category: layout.category.slice(0, count), age: layout.age.slice(0, count), sizeClass: layout.sizeClass.slice(0, count), weight: layout.weight.slice(0, count),
     fileCount: layout.fileCount.slice(0, count), folderId: layout.folderId.slice(0, count),
     surface: layout.surface.slice(0, count * 4),
     frameX: layout.frameX.slice(0, frameCount), frameY: layout.frameY.slice(0, frameCount),
@@ -90,7 +89,7 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   // inside each folder would show as a grid of flat lines. Flat fills need the gap, and so does
   // forced colors, which ignores the shading setting and outlines each tile alone. Its outlines are
   // all alike, so the gap between folders is the only thing that shows which files belong together.
-  const cushion = view.shading === 'cushion' && !view.forced;
+  const cushion = view.shading !== 'flat' && !view.forced;
   const full = layoutTree(root, { files: tree.fileCount, folders: tree.folderCount }, {
     width: view.width, height: view.height, metric: view.metric, now: startedAt,
     inset: cushion ? 0 : undefined,
@@ -104,10 +103,10 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
     offscreen.height = Math.round(view.height * view.devicePixelRatio);
     context.setTransform(view.devicePixelRatio, 0, 0, view.devicePixelRatio, 0, 0);
     const style: PaintStyle = {
-      colors: view.colors, colorMode: view.colorMode, forced: view.forced, font: view.font, labelColorFor: bestTextOn,
+      colors: view.colors, colorMode: view.colorMode, forced: view.forced,
       pixelRatio: view.devicePixelRatio, shading: view.shading,
     };
-    paintMap(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null, (rect) => nameOfRect(full, rect));
+    paintMap(context, full, view.width, view.height, style, view.dimmed ? new Set(view.dimmed) : null);
     painted = true;
     paintMs = performance.now() - paintStarted;
   }
@@ -133,15 +132,11 @@ function layoutAndPaint(sequence: number, view: ViewSettings, send: Send) {
   const layoutMs = performance.now() - layoutStarted - paintMs;
   send(
     {
-      type: 'layout', sequence, layout: trimmed, metric: view.metric, crumbs, zoomFolderId: root.id, painted,
+      type: 'layout', sequence, layout: trimmed, metric: view.metric, crumbs, zoomFolderId: root === collapseChain(tree.root) ? null : root.id, painted,
       largestFolder, elapsedMs: { layout: layoutMs, paint: paintMs },
     },
     buffersOf(trimmed),
   );
-}
-
-function nameOfRect(layout: Layout, rect: number): string {
-  return tree.fileById(layout.id[rect])?.name ?? '';
 }
 
 function locate(requestId: number, fileId: number, send: Send) {
@@ -166,6 +161,30 @@ function locate(requestId: number, fileId: number, send: Send) {
   // also lies above (or is) the folder now shown.
   const common = [...ancestorsOf(folder), tree.root].find((candidate) => isAncestorOrSelf(candidate, lastZoomRoot)) ?? tree.root;
   answer(-1, common.id);
+}
+
+/**
+ * The file with the most weight that the last layout drew inside a group or a block, or -1. A
+ * group holds the small files of one folder, a block everything under one folder, so the files
+ * with a rectangle of their own are left out.
+ */
+function representativeFile(folderId: number, wholeFolder: boolean): number {
+  const start = tree.folderById(folderId);
+  if (!start) return -1;
+  let heaviestId = -1;
+  let heaviestWeight = 0;
+  const pending: FolderNode[] = [start];
+  for (let folder = pending.pop(); folder; folder = pending.pop()) {
+    for (const file of folder.files) {
+      const weight = lastMetric === 'size' ? file.size : file.hits;
+      if (weight > heaviestWeight && !lastFileRects.has(file.id)) {
+        heaviestWeight = weight;
+        heaviestId = file.id;
+      }
+    }
+    if (wholeFolder) pending.push(...folder.folders.values());
+  }
+  return heaviestId;
 }
 
 /** Whether `candidate` is `node` or one of its ancestors. */
@@ -211,6 +230,9 @@ export function handleMessage(message: ToWorker, send: Send): void {
       break;
     case 'locate':
       locate(message.requestId, message.fileId, send);
+      break;
+    case 'representative':
+      send({ type: 'representativeFile', requestId: message.requestId, fileId: representativeFile(message.folderId, message.wholeFolder) });
       break;
     case 'describe': {
       const node = tree.folderById(message.folderId);

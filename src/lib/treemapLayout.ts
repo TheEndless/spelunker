@@ -7,10 +7,24 @@ export type Metric = 'size' | 'matches';
 export const CATEGORY_COUNT = FILE_CATEGORIES.length;
 /** Today, this week, this month, this year, older, unknown. */
 export const AGE_BUCKET_COUNT = 6;
+/** Size classes step up by 16 times: under 16 KB, 256 KB, 4 MB, 64 MB, 1 GB, and 1 GB or more. */
+export const SIZE_CLASS_COUNT = 6;
+const FIRST_SIZE_CLASS_BYTES = 16 * 1024;
+const SIZE_CLASS_STEP = 16;
+
+/** A tile with a side under this many CSS pixels has no cushion of its own. */
+const MIN_OWN_CUSHION_SIDE = 4;
 
 export const RectKind = { File: 0, SmallFiles: 1, FolderBlock: 2 } as const;
 
 const DAY_MS = 86_400_000;
+
+/** The size class of a file: 0 for a small file up to SIZE_CLASS_COUNT - 1 for a huge one. */
+export function sizeClass(bytes: number): number {
+  let limit = FIRST_SIZE_CLASS_BYTES;
+  for (let size = 0; size < SIZE_CLASS_COUNT - 1; size++, limit *= SIZE_CLASS_STEP) if (bytes < limit) return size;
+  return SIZE_CLASS_COUNT - 1;
+}
 
 export function ageBucket(modifiedMs: number | null, now: number): number {
   if (modifiedMs === null) return AGE_BUCKET_COUNT - 1;
@@ -49,6 +63,7 @@ export interface Layout {
   depth: Uint8Array;
   category: Uint8Array;
   age: Uint8Array;
+  sizeClass: Uint8Array;
   weight: Float64Array;
   fileCount: Uint32Array;
   folderId: Int32Array;
@@ -65,6 +80,7 @@ export interface Layout {
   totalWeight: number;
   categoryWeight: Float64Array;
   ageWeight: Float64Array;
+  sizeWeight: Float64Array;
   /** The child folder of the laid-out folder that carries the most weight, or -1 when it has none. */
   largestChildFolderId: number;
 }
@@ -82,7 +98,8 @@ const ZERO_WEIGHT = 2;
 const SUBTREE_FOLDERS = 3;
 const CATEGORY_START = 4;
 const AGE_START = CATEGORY_START + CATEGORY_COUNT;
-const SUMMARY_STRIDE = AGE_START + AGE_BUCKET_COUNT;
+const SIZE_START = AGE_START + AGE_BUCKET_COUNT;
+const SUMMARY_STRIDE = SIZE_START + SIZE_CLASS_COUNT;
 
 /** How many rectangles' coefficients the surface holds before it first grows. */
 const SURFACE_START_RECTS = 4096;
@@ -92,6 +109,7 @@ interface GroupSummary {
   files: number;
   category: number;
   age: number;
+  sizeClass: number;
 }
 
 interface Item {
@@ -130,6 +148,7 @@ function summarize(root: FolderNode, folderCapacity: number, metric: Metric, now
         slab[base + WEIGHT] += weight;
         slab[base + CATEGORY_START + file.category] += weight;
         slab[base + AGE_START + ageBucket(file.modifiedMs, now)] += weight;
+        slab[base + SIZE_START + sizeClass(file.size)] += weight;
       } else {
         slab[base + ZERO_WEIGHT] += 1;
       }
@@ -218,8 +237,8 @@ export function layoutTree(
   options: LayoutOptions,
 ): Layout {
   const { width, height, metric, now } = options;
-  const minLeafArea = options.minLeafArea ?? 4;
-  const minFolderSide = options.minFolderSide ?? 6;
+  const minLeafArea = options.minLeafArea ?? 1;
+  const minFolderSide = options.minFolderSide ?? 3;
   const inset = options.inset ?? 1;
   const insetMinSide = options.insetMinSide ?? 8;
 
@@ -248,6 +267,7 @@ export function layoutTree(
     depth: new Uint8Array(capacity),
     category: new Uint8Array(capacity),
     age: new Uint8Array(capacity),
+    sizeClass: new Uint8Array(capacity),
     weight: new Float64Array(capacity),
     fileCount: new Uint32Array(capacity),
     folderId: new Int32Array(capacity),
@@ -266,6 +286,7 @@ export function layoutTree(
     // views on one buffer in a transfer list cannot be sent.
     categoryWeight: slab.slice(CATEGORY_START, CATEGORY_START + CATEGORY_COUNT),
     ageWeight: slab.slice(AGE_START, AGE_START + AGE_BUCKET_COUNT),
+    sizeWeight: slab.slice(SIZE_START, SIZE_START + SIZE_CLASS_COUNT),
     largestChildFolderId,
   };
   /** Reused for each small-files group, whose totals are read as soon as they are summed. */
@@ -273,7 +294,7 @@ export function layoutTree(
 
   const emit = (
     kind: number, id: number, x: number, y: number, w: number, h: number, depth: number,
-    category: number, age: number, weight: number, fileCount: number, folderId: number,
+    category: number, age: number, size: number, weight: number, fileCount: number, folderId: number,
     inherited: ArrayLike<number>,
   ) => {
     const i = layout.count++;
@@ -283,7 +304,7 @@ export function layoutTree(
     layout.x[i] = x; layout.y[i] = y;
     layout.w[i] = Math.fround(x + w) - Math.fround(x); layout.h[i] = Math.fround(y + h) - Math.fround(y);
     layout.id[i] = id; layout.kind[i] = kind; layout.depth[i] = Math.min(depth, 255);
-    layout.category[i] = category; layout.age[i] = age; layout.weight[i] = weight;
+    layout.category[i] = category; layout.age[i] = age; layout.sizeClass[i] = size; layout.weight[i] = weight;
     layout.fileCount[i] = fileCount; layout.folderId[i] = folderId;
     // The rectangle is a cushion of its own on top of the folders around it.
     if (i * 4 + 4 > layout.surface.length) {
@@ -292,7 +313,9 @@ export function layoutTree(
       layout.surface = grown;
     }
     for (let k = 0; k < 4; k++) layout.surface[i * 4 + k] = inherited[k];
-    addRidge(layout.surface, i * 4, x, y, x + w, y + h, CUSHION_HEIGHT * CUSHION_SCALE ** (depth + 1));
+    // A tile too small to show a bubble of its own takes the folder's smooth surface, so a field of
+    // tiny files reads as one cushion with speckled colors and not as a grid of pinpoint bubbles.
+    if (Math.min(w, h) >= MIN_OWN_CUSHION_SIDE) addRidge(layout.surface, i * 4, x, y, x + w, y + h, CUSHION_HEIGHT * CUSHION_SCALE ** (depth + 1));
   };
 
   const emitFrame = (folderId: number, x: number, y: number, w: number, h: number) => {
@@ -331,6 +354,7 @@ export function layoutTree(
           groupRow[FILES] += 1;
           groupRow[CATEGORY_START + item.file.category] += item.weight;
           groupRow[AGE_START + ageBucket(item.file.modifiedMs, now)] += item.weight;
+          groupRow[SIZE_START + sizeClass(item.file.size)] += item.weight;
         } else {
           const base = item.folderRow * SUMMARY_STRIDE;
           groupRow[FILES] += slab[base + FILES];
@@ -341,6 +365,7 @@ export function layoutTree(
         files: groupRow[FILES],
         category: indexOfLargest(groupRow, CATEGORY_START, CATEGORY_COUNT),
         age: indexOfLargest(groupRow, AGE_START, AGE_BUCKET_COUNT),
+        sizeClass: indexOfLargest(groupRow, SIZE_START, SIZE_CLASS_COUNT),
       };
       items.push({ weight: mergedWeight, file: null, folder: node, folderRow: -1, group });
       items.sort((left, right) => right.weight - left.weight);
@@ -350,12 +375,12 @@ export function layoutTree(
       if (item.file) {
         emit(
           RectKind.File, item.file.id, itemX, itemY, itemWidth, itemHeight, depth,
-          item.file.category, ageBucket(item.file.modifiedMs, now), item.weight, 1, node.id, inherited,
+          item.file.category, ageBucket(item.file.modifiedMs, now), sizeClass(item.file.size), item.weight, 1, node.id, inherited,
         );
       } else if (item.group) {
         emit(
           RectKind.SmallFiles, node.id, itemX, itemY, itemWidth, itemHeight, depth,
-          item.group.category, item.group.age, item.weight, item.group.files, node.id, inherited,
+          item.group.category, item.group.age, item.group.sizeClass, item.weight, item.group.files, node.id, inherited,
         );
       } else {
         const child = item.folder!;
@@ -364,6 +389,7 @@ export function layoutTree(
           emit(
             RectKind.FolderBlock, child.id, itemX, itemY, itemWidth, itemHeight, depth,
             indexOfLargest(slab, base + CATEGORY_START, CATEGORY_COUNT), indexOfLargest(slab, base + AGE_START, AGE_BUCKET_COUNT),
+            indexOfLargest(slab, base + SIZE_START, SIZE_CLASS_COUNT),
             item.weight, slab[base + FILES], node.id, inherited,
           );
           return;

@@ -75,6 +75,21 @@ struct Args {
     follow_links: bool,
 }
 
+/// `text` with every control character except the tab shown as an escape such as `\x1b`. File names
+/// and file lines come from whatever is being searched, and raw they could carry terminal escape
+/// sequences that change the title, move the cursor or paint over earlier output.
+fn printable(text: &str) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_control() && character != '\t' {
+            shown.push_str(&format!("\\x{:02x}", character as u32));
+        } else {
+            shown.push(character);
+        }
+    }
+    shown
+}
+
 fn main() -> ExitCode {
     let args = Args::parse();
 
@@ -118,15 +133,27 @@ fn main() -> ExitCode {
     let outcome = search(&config, &cancel, |event| match event {
         // One print per event keeps a file's lines together when workers report at the same time.
         SearchEvent::File(file) => {
-            let mut block = format!("{} ({} hits)\n", file.path.display(), file.hits.len());
+            let mut block = format!(
+                "{} ({} hits)\n",
+                printable(&file.path.display().to_string()),
+                file.hits.len()
+            );
             for hit in &file.hits {
-                block.push_str(&format!("  {}: {}\n", hit.line_number, hit.line));
+                block.push_str(&format!(
+                    "  {}: {}\n",
+                    hit.line_number,
+                    printable(&hit.line)
+                ));
             }
             print!("{block}");
         }
         SearchEvent::Progress { .. } => {}
         SearchEvent::Error(error) => {
-            eprintln!("error: {}: {}", error.path.display(), error.message)
+            eprintln!(
+                "error: {}: {}",
+                printable(&error.path.display().to_string()),
+                printable(&error.message)
+            )
         }
     });
 
@@ -156,5 +183,22 @@ fn main() -> ExitCode {
             eprintln!("error: {error}");
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_text_and_tabs_are_left_alone() {
+        assert_eq!(printable("let x = 1;\tdone"), "let x = 1;\tdone");
+        assert_eq!(printable("caf\u{e9} \u{1F600}"), "caf\u{e9} \u{1F600}");
+    }
+
+    #[test]
+    fn an_escape_sequence_is_shown_instead_of_run() {
+        assert_eq!(printable("\x1b]0;owned\x07"), "\\x1b]0;owned\\x07");
+        assert_eq!(printable("a\r\nb"), "a\\x0d\\x0ab");
     }
 }

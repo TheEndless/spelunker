@@ -1,4 +1,3 @@
-import { bestTextOn, normalizeHex } from './colors';
 import { defaultLayout, normalizeLayout, type ColumnLayout } from './columnLayout';
 import { normalizeMapHeight, normalizePreviewWidth } from './paneSplit';
 import { DEFAULT_CRITERIA, normalizeCriteria, type Criteria } from './criteria';
@@ -22,8 +21,6 @@ interface Stored {
   filtersOpen: boolean;
   columns: ColumnLayout;
   editor: EditorSettings;
-  /** A custom color for highlighted matches, or null to use the theme's own. */
-  highlightColor: string | null;
   /** The preview's width in pixels, or null until the user drags the splitter (then a share of the window applies). */
   previewWidth: number | null;
   previewCollapsed: boolean;
@@ -31,20 +28,21 @@ interface Stored {
   /** The results map's height in pixels, or null until the user drags its splitter (then a default applies). */
   mapHeight: number | null;
   mapMetric: 'size' | 'matches';
-  mapColor: 'type' | 'age';
+  mapColor: 'type' | 'age' | 'size';
   mapShading: Shading;
-}
-
-/** A stored highlight color is used only if it is a real hex color. */
-function validHighlight(value: unknown): string | null {
-  if (typeof value !== 'string' || !/^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(value)) return null;
-  return normalizeHex(value);
+  /** Look for a newer release when the app starts, at most once a day. */
+  checkForUpdates: boolean;
+  /** When a check last ran, in milliseconds, or null if none has. */
+  lastUpdateCheck: number | null;
+  /** The version whose banner was dismissed, so that one is not announced again. */
+  dismissedUpdate: string | null;
 }
 
 const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
 
-function load(): Stored {
-  const defaults: Stored = {
+/** Every preference as it is on a first run. */
+function defaultStored(): Stored {
+  return {
     criteria: normalizeCriteria(DEFAULT_CRITERIA),
     contextLines: 2,
     recentFolders: [],
@@ -53,15 +51,21 @@ function load(): Stored {
     filtersOpen: false,
     columns: defaultLayout(),
     editor: DEFAULT_EDITOR,
-    highlightColor: null,
     previewWidth: null,
     previewCollapsed: false,
     mapCollapsed: false,
     mapHeight: null,
     mapMetric: 'size',
-    mapColor: 'type',
-    mapShading: 'cushion',
+    mapColor: 'size',
+    mapShading: 'facet',
+    checkForUpdates: true,
+    lastUpdateCheck: null,
+    dismissedUpdate: null,
   };
+}
+
+function load(): Stored {
+  const defaults = defaultStored();
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
     if (typeof raw !== 'object' || raw === null) return defaults;
@@ -77,14 +81,16 @@ function load(): Stored {
       filtersOpen: raw.filtersOpen === true,
       columns: normalizeLayout(raw.columns),
       editor: normalizeEditor(raw.editor),
-      highlightColor: validHighlight(raw.highlightColor),
       previewWidth: normalizePreviewWidth(raw.previewWidth),
       previewCollapsed: raw.previewCollapsed === true,
       mapCollapsed: raw.mapCollapsed === true,
       mapHeight: normalizeMapHeight(raw.mapHeight),
       mapMetric: raw.mapMetric === 'matches' ? 'matches' : 'size',
-      mapColor: raw.mapColor === 'age' ? 'age' : 'type',
-      mapShading: raw.mapShading === 'flat' ? 'flat' : 'cushion',
+      mapColor: raw.mapColor === 'type' || raw.mapColor === 'age' ? raw.mapColor : defaults.mapColor,
+      mapShading: raw.mapShading === 'flat' || raw.mapShading === 'cushion' ? raw.mapShading : defaults.mapShading,
+      checkForUpdates: raw.checkForUpdates !== false,
+      lastUpdateCheck: typeof raw.lastUpdateCheck === 'number' && Number.isFinite(raw.lastUpdateCheck) ? raw.lastUpdateCheck : null,
+      dismissedUpdate: typeof raw.dismissedUpdate === 'string' ? raw.dismissedUpdate : null,
     };
   } catch {
     // Storage can be unavailable or corrupt. Start from defaults.
@@ -102,14 +108,16 @@ export class Preferences {
   filtersOpen = $state(false);
   columns = $state<ColumnLayout>(defaultLayout());
   editor = $state<EditorSettings>(DEFAULT_EDITOR);
-  highlightColor = $state<string | null>(null);
   previewWidth = $state<number | null>(null);
   previewCollapsed = $state(false);
   mapCollapsed = $state(false);
   mapHeight = $state<number | null>(null);
   mapMetric = $state<'size' | 'matches'>('size');
-  mapColor = $state<'type' | 'age'>('type');
-  mapShading = $state<Shading>('cushion');
+  mapColor = $state<'type' | 'age' | 'size'>('size');
+  mapShading = $state<Shading>('facet');
+  checkForUpdates = $state(true);
+  lastUpdateCheck = $state<number | null>(null);
+  dismissedUpdate = $state<string | null>(null);
 
   constructor() {
     Object.assign(this, load());
@@ -123,6 +131,12 @@ export class Preferences {
   /** Replaces every criterion, for example when a saved search is recalled. */
   applyCriteria(criteria: Criteria) {
     this.criteria = normalizeCriteria(criteria);
+  }
+
+  /** Puts every preference back as it is on a first run, and saves that. */
+  reset() {
+    Object.assign(this, defaultStored());
+    this.save();
   }
 
   rememberFolders() {
@@ -157,7 +171,6 @@ export class Preferences {
       filtersOpen: this.filtersOpen,
       columns: $state.snapshot(this.columns),
       editor: $state.snapshot(this.editor),
-      highlightColor: this.highlightColor,
       previewWidth: this.previewWidth,
       previewCollapsed: this.previewCollapsed,
       mapCollapsed: this.mapCollapsed,
@@ -165,6 +178,9 @@ export class Preferences {
       mapMetric: this.mapMetric,
       mapColor: this.mapColor,
       mapShading: this.mapShading,
+      checkForUpdates: this.checkForUpdates,
+      lastUpdateCheck: this.lastUpdateCheck,
+      dismissedUpdate: this.dismissedUpdate,
     };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
@@ -178,7 +194,7 @@ export class Preferences {
  * Applies the color theme to the document: sets every color token as a CSS variable, and keeps
  * following Windows while the mode preference is "system".
  */
-export function applyTheme(preference: ThemePreference, paletteId: string, highlightColor: string | null = null): () => void {
+export function applyTheme(preference: ThemePreference, paletteId: string): () => void {
   const media = window.matchMedia('(prefers-color-scheme: dark)');
   const apply = () => {
     const mode = resolveTheme(preference, media.matches);
@@ -189,10 +205,6 @@ export function applyTheme(preference: ThemePreference, paletteId: string, highl
     for (const name of TOKEN_NAMES) root.style.setProperty(`--${name}`, tokens[name]);
     root.style.setProperty('--accent-text', accentTextFor(tokens));
     root.style.setProperty('--placeholder', placeholderColorFor(tokens));
-    if (highlightColor) {
-      root.style.setProperty('--match-bg', highlightColor);
-      root.style.setProperty('--match-text', bestTextOn(highlightColor));
-    }
     root.style.setProperty(
       '--shadow',
       mode === 'dark' ? '0 8px 22px rgba(0, 0, 0, 0.55)' : '0 6px 18px rgba(20, 26, 36, 0.16)',

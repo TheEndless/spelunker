@@ -69,8 +69,38 @@ function resultRow(path: string): ResultRow {
 }
 
 function batchOf(...paths: string[]): SearchMessage {
-  return { kind: 'batch', rows: paths.map(resultRow), errors: [], filesScanned: null };
+  return { kind: 'batch', rows: paths.map(resultRow), errors: [], filesScanned: null, folder: null };
 }
+
+describe('the folder being searched', () => {
+  const progress = (folder: string | null): SearchMessage => ({ kind: 'batch', rows: [], errors: [], filesScanned: 256, folder });
+
+  it('follows the latest progress report', () => {
+    const session = startedSession();
+    expect(session.currentFolder).toBe('');
+    backend.emit!(progress('C:/x/a'));
+    expect(session.currentFolder).toBe('C:/x/a');
+    backend.emit!(progress('C:/x/b'));
+    expect(session.currentFolder).toBe('C:/x/b');
+  });
+
+  it('keeps the last folder through a batch that carries no progress', () => {
+    const session = startedSession();
+    backend.emit!(progress('C:/x/a'));
+    backend.emit!(batchOf('C:/x/a/f'));
+    expect(session.currentFolder).toBe('C:/x/a');
+  });
+
+  it('is empty again once the search is done, and at the start of the next one', () => {
+    const session = startedSession();
+    backend.emit!(progress('C:/x/a'));
+    backend.emit!(done);
+    expect(session.currentFolder).toBe('');
+    backend.emit!(progress('C:/x/a'));
+    session.start(request);
+    expect(session.currentFolder).toBe('');
+  });
+});
 
 describe('row ids and session events', () => {
   it('gives every accepted row a unique, increasing id', () => {

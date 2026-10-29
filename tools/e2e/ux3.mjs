@@ -42,12 +42,16 @@ await ev(`document.querySelector('button.go').click()`);
 await sleep(1500);
 
 // ---- column chooser
-check('default headings in the classic order', JSON.stringify(await headings()) === JSON.stringify(['Name', 'Folder', 'Matches', 'Size', 'Modified', 'Type']), await headings());
+check('default headings in the classic order, without Matches', JSON.stringify(await headings()) === JSON.stringify(['Name', 'Folder', 'Size', 'Modified', 'Type']), await headings());
 const corner = await rect('.corner');
 await click(corner.cx, corner.cy);
 const menuItems = await ev(`[...document.querySelectorAll('[role=menu][aria-label=Columns] [role^=menuitem]')].map((b) => [b.innerText.trim(), b.getAttribute('aria-checked')])`);
-check('chooser lists every column checked, then the sizing commands', menuItems.length === 9 && menuItems.slice(0, 6).every(([, checked]) => checked === 'true'), menuItems);
+check('chooser lists every column, all checked but Matches, then the sizing commands', menuItems.length === 9 && menuItems.slice(0, 6).every(([label, checked]) => checked === (label === 'Matches' ? 'false' : 'true')), menuItems);
 await shot('columns-menu', { x: 400, y: 100, width: 500, height: 420 });
+
+const matchesItem = await ev(`(() => { const b = [...document.querySelectorAll('[role=menu][aria-label=Columns] button')].find((x) => x.innerText.trim() === 'Matches'); const r = b.getBoundingClientRect(); return { x: r.x + 30, y: r.y + r.height / 2 }; })()`);
+await click(matchesItem.x, matchesItem.y);
+check('choosing Matches shows the column in its place', JSON.stringify(await headings()) === JSON.stringify(['Name', 'Folder', 'Matches', 'Size', 'Modified', 'Type']), await headings());
 
 const typeItem = await ev(`(() => { const b = [...document.querySelectorAll('[role=menu][aria-label=Columns] button')].find((x) => x.innerText.trim() === 'Type'); const r = b.getBoundingClientRect(); return { x: r.x + 30, y: r.y + r.height / 2 }; })()`);
 await click(typeItem.x, typeItem.y);
@@ -106,7 +110,7 @@ await click(corner2.cx, corner2.cy);
 const reset = await ev(`(() => { const b = [...document.querySelectorAll('[role=menu][aria-label=Columns] button')].find((x) => x.innerText.trim() === 'Reset columns'); const r = b.getBoundingClientRect(); return { x: r.x + 30, y: r.y + r.height / 2 }; })()`);
 await click(reset.x, reset.y);
 order = await headings();
-check('Reset columns restores the default set and order', JSON.stringify(order) === JSON.stringify(['Name', 'Folder', 'Matches', 'Size', 'Modified', 'Type']), order);
+check('Reset columns restores the default set and order', JSON.stringify(order) === JSON.stringify(['Name', 'Folder', 'Size', 'Modified', 'Type']), order);
 
 // ---- right-click on a heading opens the same chooser, and the Menu key does too
 const folderHeading = await rect('.head:nth-child(2)');

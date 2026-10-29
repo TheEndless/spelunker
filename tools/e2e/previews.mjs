@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 mkdirSync('final', { recursive: true });
 import { PAGE_HELPERS } from './cdp.mjs';
+import { findSpelunkerPage } from './target.mjs';
 
-const targets = await (await fetch('http://127.0.0.1:9222/json')).json();
-const page = targets.find((target) => target.type === 'page');
+const page = await findSpelunkerPage();
 const socket = new WebSocket(page.webSocketDebuggerUrl);
 await new Promise((resolve) => (socket.onopen = resolve));
 let nextId = 1;

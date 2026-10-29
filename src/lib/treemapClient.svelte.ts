@@ -159,6 +159,12 @@ export class TreemapClient {
     return answer.type === 'located' ? { rect: answer.rect, zoomFolderId: answer.zoomFolderId } : { rect: -1, zoomFolderId: null };
   }
 
+  /** The heaviest file hidden in a group (one folder's small files) or a block (a whole folder), or -1. */
+  async representativeOf(folderId: number, wholeFolder: boolean): Promise<number> {
+    const answer = await this.ask({ type: 'representative', folderId, wholeFolder });
+    return answer.type === 'representativeFile' ? answer.fileId : -1;
+  }
+
   async describeFolder(folderId: number): Promise<string> {
     const answer = await this.ask({ type: 'describe', folderId });
     return answer.type === 'described' ? answer.path : '';
@@ -265,7 +271,12 @@ export class TreemapClient {
     }
   }
 
-  private ask(question: { type: 'locate'; fileId: number } | { type: 'describe'; folderId: number }): Promise<FromWorker> {
+  private ask(
+    question:
+      | { type: 'locate'; fileId: number }
+      | { type: 'describe'; folderId: number }
+      | { type: 'representative'; folderId: number; wholeFolder: boolean },
+  ): Promise<FromWorker> {
     const requestId = ++this.requestCounter;
     return new Promise<FromWorker>((resolve) => {
       this.waiting.set(requestId, resolve);

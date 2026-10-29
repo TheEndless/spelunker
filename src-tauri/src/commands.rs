@@ -1,12 +1,13 @@
-use crate::batcher::{forward_batches, BATCH_INTERVAL};
+use crate::batcher::{event_queue, forward_batches, BATCH_INTERVAL};
 use crate::dto::{PreviewLineDto, QueryRequest, SearchMessage, SearchRequest};
+use crate::editor_approvals::ApprovedEditors;
+use crate::search_scope::SearchScope;
 use crate::store::{LoadedSearches, SavedSearchStore};
 use spelunker_core::{
     preview_file, search, validate_content_query, validate_name_regex as check_name_regex,
     CancelToken,
 };
 use std::process::Command;
-use std::sync::mpsc;
 use std::sync::Mutex;
 use tauri::ipc::Channel;
 use tauri::State;
@@ -39,12 +40,14 @@ pub fn start_search(
     request: SearchRequest,
     on_message: Channel<SearchMessage>,
     active: State<'_, ActiveSearch>,
+    scope: State<'_, SearchScope>,
 ) {
     let cancel = active.replace();
     let config = request.into_config();
+    scope.set(&config.roots);
 
     std::thread::spawn(move || {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = event_queue();
         let batch_channel = on_message.clone();
         let forwarder = std::thread::spawn(move || {
             forward_batches(receiver, BATCH_INTERVAL, |message| {
@@ -78,13 +81,35 @@ pub fn stop_search(active: State<'_, ActiveSearch>) {
     active.cancel();
 }
 
+/// The system's icon for files ending in `extension`, as the bytes of a PNG, or no bytes when the
+/// shell has none. `large` asks for the bigger icon a card shows, not the one a row does. The shell
+/// can be slow the first time it is asked, so it runs off the window's thread.
+#[tauri::command]
+pub async fn file_icon(extension: String, large: bool) -> tauri::ipc::Response {
+    let size = if large {
+        crate::file_icon::IconSize::Large
+    } else {
+        crate::file_icon::IconSize::Small
+    };
+    let png = tauri::async_runtime::spawn_blocking(move || {
+        crate::file_icon::png_for_extension(&extension, size)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+    tauri::ipc::Response::new(png)
+}
+
 #[tauri::command]
 pub async fn preview(
+    scope: State<'_, SearchScope>,
     path: String,
     query: QueryRequest,
     context_lines: usize,
     include_binary: bool,
 ) -> Result<Vec<PreviewLineDto>, String> {
+    scope.check(&path)?;
     let query = query.into_query();
     tauri::async_runtime::spawn_blocking(move || {
         preview_file(path.as_ref(), &query, context_lines, include_binary)
@@ -96,7 +121,8 @@ pub async fn preview(
 }
 
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
+pub fn open_path(scope: State<'_, SearchScope>, path: String) -> Result<(), String> {
+    scope.check(&path)?;
     Command::new("explorer")
         .arg(path)
         .spawn()
@@ -104,14 +130,56 @@ pub fn open_path(path: String) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// The command line text that makes Explorer select `path`. Explorer reads the whole text after
+/// "/select," as one path, and quoting it keeps a comma in a folder name from being taken as a
+/// separator. It is passed raw, so a quote in the path would end the quoted part and let the rest
+/// be read as more arguments. A real file name cannot hold one, so such a path is refused, and so
+/// is one with a control character.
+fn reveal_argument(path: &str) -> Result<String, String> {
+    if path
+        .chars()
+        .any(|character| character == '"' || character.is_control())
+    {
+        return Err("That path has a character that cannot be shown in Explorer".to_string());
+    }
+    Ok(format!("/select,\"{path}\""))
+}
+
+/// Looks on GitHub for a newer release than this app. It runs off the window's thread, since it waits
+/// on the network. The answer says what was found, or why nothing could be.
 #[tauri::command]
-pub fn reveal_path(path: String) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    // Explorer reads the whole text after "/select," as one path. Quoting it keeps a comma in a
-    // folder name from being taken as a separator. The argument is passed raw so Rust's own
-    // escaping does not add backslashes inside it.
+pub async fn check_for_updates(
+    app: tauri::AppHandle,
+) -> Result<crate::updates::UpdateInfo, String> {
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || crate::updates::check(&current))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
+}
+
+/// Opens a page of this project's releases in the browser. Any other address is refused, so the page
+/// cannot use this to open something else.
+#[tauri::command]
+pub fn open_release_page(address: String) -> Result<(), String> {
+    if !crate::updates::is_openable(&address) {
+        return Err("That is not a page of Spelunker's releases".to_string());
+    }
     Command::new("explorer")
-        .raw_arg(format!("/select,\"{path}\""))
+        .arg(address)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn reveal_path(scope: State<'_, SearchScope>, path: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    scope.check(&path)?;
+    let argument = reveal_argument(&path)?;
+    // The argument is passed raw so Rust's own escaping does not add backslashes inside it.
+    Command::new("explorer")
+        .raw_arg(argument)
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -186,9 +254,11 @@ const PREVIEW_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// The whole text of a file for the preview, with lines matching `query` marked.
 #[tauri::command]
 pub async fn read_file_text(
+    scope: State<'_, SearchScope>,
     path: String,
     query: Option<QueryRequest>,
 ) -> Result<crate::dto::FileTextDto, String> {
+    scope.check(&path)?;
     let query = query.map(QueryRequest::into_query);
     tauri::async_runtime::spawn_blocking(move || {
         spelunker_core::read_file_text(path.as_ref(), query.as_ref(), PREVIEW_MAX_BYTES)
@@ -199,18 +269,103 @@ pub async fn read_file_text(
     .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
-    // Saving to a slow or offline share must not freeze the window.
-    tauri::async_runtime::spawn_blocking(move || std::fs::write(path, content))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+/// Whether `extension` can be offered as a file type in the save dialog: a few letters or digits.
+fn is_plain_extension(extension: &str) -> bool {
+    (1..=8).contains(&extension.len())
+        && extension
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
 }
 
+/// Asks the person where to save `content` and writes it there. The page never names the file: the
+/// place comes from the native dialog, which only the person at the keyboard can answer, so a page
+/// cannot use this to write anywhere it likes. False when the dialog was cancelled.
 #[tauri::command]
-pub fn open_in_editor(template: String, path: String, line: u64) -> Result<(), String> {
-    crate::editor::open_in_editor(&template, &path, line)
+pub async fn save_text_file(
+    app: tauri::AppHandle,
+    suggested_name: String,
+    extension: String,
+    content: String,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    if !is_plain_extension(&extension) {
+        return Err("That is not a file type this can save".to_string());
+    }
+    // The dialog waits for an answer, and saving to a slow or offline share must not freeze the window.
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(target) = app
+            .dialog()
+            .file()
+            .set_file_name(suggested_name)
+            .add_filter(extension.to_uppercase(), &[extension.as_str()])
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = target.into_path().map_err(|error| error.to_string())?;
+        std::fs::write(path, content)
+            .map(|()| true)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Opens `path` in the editor the page names at `line`. A built-in editor (`vscode`, `notepadpp`)
+/// has its command line here, in Rust. A custom command comes from the page, so the first time a
+/// command is used the person is asked, in a native dialog the page cannot answer, whether to run
+/// it, and the answer is remembered.
+#[tauri::command]
+pub async fn open_in_editor(
+    app: tauri::AppHandle,
+    scope: State<'_, SearchScope>,
+    approvals: State<'_, ApprovedEditors>,
+    editor: String,
+    custom_template: String,
+    path: String,
+    line: u64,
+) -> Result<(), String> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    scope.check(&path)?;
+    let template = match crate::editor::built_in_template(&editor) {
+        Some(built_in) => built_in.to_string(),
+        None if editor == "custom" => {
+            let custom = custom_template.trim().to_string();
+            if custom.is_empty() {
+                return Err("No editor command is set. Choose an editor in Settings".to_string());
+            }
+            if !approvals.is_approved(&custom) {
+                let question = format!(
+                    "Spelunker is about to run this command to open a file:\n\n{custom}\n\nOnly run it if you wrote it in Settings."
+                );
+                let allowed = tauri::async_runtime::spawn_blocking(move || {
+                    app.dialog()
+                        .message(question)
+                        .title("Run this editor command?")
+                        .kind(MessageDialogKind::Warning)
+                        .buttons(MessageDialogButtons::OkCancelCustom(
+                            "Run it".to_string(),
+                            "Cancel".to_string(),
+                        ))
+                        .blocking_show()
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+                if !allowed {
+                    return Err("The custom editor command was not approved".to_string());
+                }
+                approvals.approve(&custom);
+            }
+            custom
+        }
+        None => return Err("That editor is not one Spelunker knows".to_string()),
+    };
+    // Finding the program looks on the disk, so it stays off the window's thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::editor::open_in_editor(&template, &path, line)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn current_exe_text() -> Result<String, String> {
@@ -296,12 +451,14 @@ pub fn take_launch_folder(launch: State<'_, LaunchFolder>) -> Option<String> {
 #[tauri::command]
 pub fn show_shell_menu(
     window: tauri::WebviewWindow,
+    scope: State<'_, SearchScope>,
     paths: Vec<String>,
     x: i32,
     y: i32,
     extra_labels: Vec<String>,
 ) -> Result<ShellMenuResult, String> {
     use crate::shell_menu::{client_to_screen, show, ExtraItem, Outcome};
+    scope.check_all(&paths)?;
     let handle = window.hwnd().map_err(|error| error.to_string())?;
     let hwnd = windows::Win32::Foundation::HWND(handle.0);
     let (screen_x, screen_y) = client_to_screen(hwnd, x, y);
@@ -320,6 +477,25 @@ pub fn show_shell_menu(
     })
 }
 
+/// Shows the native folder dialog and returns the folder chosen, or the This PC label listing the
+/// local drives when This PC was chosen. None when it was cancelled, when the choice is not
+/// something a search can use (Network, Control Panel), or while another menu or dialog is open.
+/// Runs on the window's thread, which is where the shell wants its dialogs.
+#[tauri::command]
+pub fn pick_folder(window: tauri::WebviewWindow) -> Result<Option<String>, String> {
+    let Some(_modal) = crate::modal_guard::try_enter() else {
+        return Ok(None);
+    };
+    let handle = window.hwnd().map_err(|error| error.to_string())?;
+    crate::folder_dialog::pick(windows::Win32::Foundation::HWND(handle.0))
+}
+
+/// What Look in shows for This PC: its name and the letters of the local fixed drives.
+#[tauri::command]
+pub fn this_pc_label() -> String {
+    crate::drives::this_pc_label(&crate::drives::fixed_drives())
+}
+
 /// Starts a native drag of the files. Refused unless the physical primary mouse button is down,
 /// this window is the foreground window, and the top-level window under the pointer is this one,
 /// all checked before the paths are parsed and again right before the drag (see
@@ -328,8 +504,10 @@ pub fn show_shell_menu(
 #[tauri::command]
 pub fn start_file_drag(
     window: tauri::WebviewWindow,
+    scope: State<'_, SearchScope>,
     paths: Vec<String>,
 ) -> Result<crate::file_drag::DragOutcome, String> {
+    scope.check_all(&paths)?;
     let handle = window.hwnd().map_err(|error| error.to_string())?;
     crate::file_drag::start(windows::Win32::Foundation::HWND(handle.0), &paths)
 }
@@ -349,8 +527,13 @@ pub struct ShellMenuResult {
 /// Nothing is readable that way until it has been allowed here, and a file named like a PDF has to
 /// be a real PDF, so a hostile page cannot be passed off as one.
 #[tauri::command]
-pub async fn allow_preview(app: tauri::AppHandle, path: String) -> Result<(), String> {
+pub async fn allow_preview(
+    app: tauri::AppHandle,
+    scope: State<'_, SearchScope>,
+    path: String,
+) -> Result<(), String> {
     use tauri::Manager;
+    scope.check(&path)?;
     let checked = path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         crate::preview_access::verify_previewable(std::path::Path::new(&checked))
@@ -368,6 +551,38 @@ mod tests {
 
     fn path_text(path: &std::path::Path) -> String {
         path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn only_a_short_plain_extension_can_be_offered_to_save() {
+        for good in ["csv", "json", "txt", "md", "Log2"] {
+            assert!(is_plain_extension(good), "{good}");
+        }
+        for bad in [
+            "",
+            "*",
+            "c sv",
+            "a.b",
+            "toolongextension",
+            "exe;bat",
+            "\u{e9}",
+        ] {
+            assert!(!is_plain_extension(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn reveal_quotes_the_path_for_explorer() {
+        assert_eq!(
+            reveal_argument(r"C:\My Files\a, b.txt").unwrap(),
+            r#"/select,"C:\My Files\a, b.txt""#
+        );
+    }
+
+    #[test]
+    fn reveal_refuses_a_path_that_could_end_the_quote() {
+        assert!(reveal_argument(r#"C:\a" C:\Windows\win.ini"#).is_err());
+        assert!(reveal_argument("C:\\a\nb").is_err());
     }
 
     #[test]

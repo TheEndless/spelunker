@@ -26,6 +26,10 @@
   <img alt="Vitest" src="https://img.shields.io/badge/tested%20with-Vitest-6E9F18?logo=vitest&logoColor=white">
 </p>
 
+<p align="center">
+  <img src="docs/images/screenshot.png" alt="Spelunker searching a documents folder for the word invoice: the results list with match counts, a preview of the selected email with the matches highlighted, and a map of the results below" width="900">
+</p>
+
 ---
 
 ## What it does
@@ -36,7 +40,7 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Content search.** Literal, whole word, match case, or regex (including across lines). Reads UTF-8, UTF-8 with BOM, UTF-16 LE/BE, and falls back to Windows-1252. Skips binary files unless asked.
 - **Name search.** `*` and `?` wildcards, several patterns separated by `;` or `,`, and exclusions with a leading `-` (for example `*.log; -*.min.js`). A plain word matches anywhere in the name.
 - **Filters when needed.** Size, modified date, created date, and a name regex, in a panel that stays closed until you need it, with a badge counting what is active.
-- **Search everywhere.** Pick any folders, or choose **This PC (all drives)** to search every local fixed drive.
+- **Search everywhere.** Pick any folders, or choose **This PC** in the Browse dialog or the Look in list to search every local fixed drive (it shows as `This PC (C:, D:)`, and you can edit the letters).
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
 - **Results map.** A treemap below the results shows where your matches are: rectangle area is file size or match count, color is file type or age. It fills in as the search runs, click a rectangle to select the file, Ctrl+click to zoom into its folder, and `Ctrl+Shift+M` hides it. Tiles are shaded like lit cushions, with a Flat option in Settings.
 - **Select many, drag them out.** Select results the way you do in File Explorer (Ctrl+click, Shift+click, Shift with the arrow keys, Ctrl+A), see the count and total size in the status bar, and drag the selection out of the window into Explorer and other programs that accept files. Right-click a selection (up to 5,000 files) for the Windows context menu of every selected file.
@@ -130,6 +134,8 @@ npm test                                 # frontend logic (Vitest)
 npm run check                            # svelte-check: types and accessibility
 ```
 
+The screenshot above is made by `node tools/e2e/screenshot.mjs`, from an invented documents folder in the browser build, so no real file name is in it.
+
 The `tools/e2e` scripts drive the real app window over the Chrome DevTools protocol. Read [tools/e2e/README.md](tools/e2e/README.md) first, because some scripts open native Windows menus.
 
 A command-line harness runs the same engine without the UI:
@@ -148,6 +154,17 @@ cargo run -p spelunker-cli -- -l <folder> -n "*.rs" -t "text" [-c] [-w] [-r]
 | [`src`](src) | The Svelte 5 and TypeScript interface. Pure logic sits in `src/lib/*.ts` with tests beside it. |
 
 The interface never touches the disk. All file access lives in `spelunker-core`.
+
+## Security notes
+
+The one thing Spelunker asks the network for is the newest release number. The backend (`src-tauri/src/updates.rs`) does it over HTTPS to one fixed GitHub address, when you press Check for updates on the About tab or, unless you turn it off there, once a day as the app starts. The page cannot choose the address, the reply is size and time limited, and View release opens only a page of this project's releases. Nothing about you or your files is sent. The page shown in the window is treated as untrusted, so the backend does not simply do what it asks:
+
+- Commands that take a path (preview, open, reveal in Explorer, the system menu, drag out, open in editor) work only on files inside the folders of the current search.
+- Saving an export shows the native save dialog from the backend, and the page never names the file it writes.
+- A custom editor command is not run until you approve it in a native dialog the first time. The built-in editors have their command lines in the app.
+- A strict Content Security Policy limits what the page can load, and a file named `.pdf` is shown only if it begins with the PDF header.
+
+The installers are unsigned.
 
 ## License
 

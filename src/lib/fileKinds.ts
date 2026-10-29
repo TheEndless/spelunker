@@ -39,7 +39,7 @@ for (const [category, extensions] of Object.entries(CATEGORY_EXTENSIONS)) {
 }
 
 /** Lowercase extension without the dot. A leading dot alone (".gitignore") is a name, not an extension. */
-function extensionOf(name: string): string {
+export function extensionOf(name: string): string {
   const dot = name.lastIndexOf('.');
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }

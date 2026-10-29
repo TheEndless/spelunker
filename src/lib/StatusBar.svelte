@@ -10,6 +10,8 @@
     running: boolean;
     stopping: boolean;
     filesScanned: number;
+    /** The folder the search is in right now. Shown only while it runs. */
+    folder?: string;
     /** Files in the results list. */
     matches: number;
     elapsedMs: number;
@@ -29,6 +31,7 @@
     running,
     stopping,
     filesScanned,
+    folder = '',
     matches,
     elapsedMs,
     errors,
@@ -63,6 +66,10 @@
   {/if}
   {#if selection}
     <span class="selection">{selection}</span>
+  {/if}
+  {#if running && folder}
+    <!-- Not announced: it changes many times a second, like the counters beside it. -->
+    <span class="folder" title={folder}>{folder}</span>
   {/if}
   <span class="mechanics">
     <span>{filesScanned.toLocaleString()} files scanned</span>
@@ -141,6 +148,15 @@
   }
   .selection {
     color: var(--text);
+  }
+  /* Takes the room between the find and the counters. Long paths are cut at the end, so the drive
+     and the first folders, which show where in the order the search is, stay visible. */
+  .folder {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .mechanics {
     display: flex;

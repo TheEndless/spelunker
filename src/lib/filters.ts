@@ -139,7 +139,6 @@ export interface FilterState {
   size: SizeFilter;
   modified: DateFilter;
   created: DateFilter;
-  nameIsRegex: boolean;
   multiLine: boolean;
 }
 
@@ -149,7 +148,6 @@ export function activeFilterCount(state: FilterState): number {
     state.size.mode !== 'any',
     state.modified.mode !== 'any',
     state.created.mode !== 'any',
-    state.nameIsRegex,
     state.multiLine,
   ].filter(Boolean).length;
 }
