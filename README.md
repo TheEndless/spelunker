@@ -46,8 +46,10 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Select many, drag them out.** Select results the way you do in File Explorer (Ctrl+click, Shift+click, Shift with the arrow keys, Ctrl+A), see the count and total size in the status bar, and drag the selection out of the window into Explorer and other programs that accept files. Right-click a selection (up to 5,000 files) for the Windows context menu of every selected file.
 - **Real Windows integration.** Right-click a result for the genuine Windows context menu, with Spelunker's own entries on top (open containing folder, copy path, copy name, copy matching lines, or copy paths and copy names for several files). Right-click a folder, a drive, or **This PC** in Explorer and choose **Search with Spelunker**.
 - **Your columns, your way.** Resize, reorder, show or hide columns, and let them fill the window automatically. Dates follow your Windows regional format.
-- **12 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows.
-- **Keyboard first.** Every pane, column, and splitter works without a mouse. Press `F1` in the app for the full list.
+- **12 themes, each with light and dark.** Designed separately, not inverted, and the default **Slate** follows Windows. Pick one from the toolbar or on the Appearance tab of Settings. The match highlight follows each theme's accent.
+- **Settings in three tabs.** **Files** holds the editor, preview and Explorer options, **Appearance** the mode and theme, and **About** the version, license, a button to copy the version details, and the update check. Reset everything to defaults from the footer (saved searches are kept).
+- **Update check.** **Check for updates** on the About tab asks GitHub for the newest release, and a banner under the toolbar announces a newer one with a **View release** button. Dismissing it hides that version only. The app also checks once a day as it starts, and you can turn that off.
+- **Keyboard first.** Every pane, column, and splitter works without a mouse. Press `F1` in the app for the full list, shown in a dialog grouped by what you are doing.
 
 ## Install
 
@@ -61,7 +63,7 @@ Download a package from the [latest release](https://github.com/TheEndless/spelu
 
 The packages are not code-signed, so Windows SmartScreen may warn on first run. To build them yourself, see [Build](#build).
 
-The portable exe needs no installer. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
+The portable exe needs no installer. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Files > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
 
 ## Using Spelunker
 
