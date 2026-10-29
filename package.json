@@ -2,6 +2,31 @@
   "name": "spelunker",
   "private": true,
   "version": "1.2.0",
+  "description": "Fast Windows file search: find text inside files (grep GUI with regex and whole word), match file names with wildcards, filter by size and date, preview matches, and see results on a disk usage treemap. Rust, Tauri 2, Svelte 5.",
+  "keywords": [
+    "file-search",
+    "search-in-files",
+    "find-in-files",
+    "grep-gui",
+    "windows",
+    "desktop",
+    "regex",
+    "wildcard",
+    "treemap",
+    "disk-usage",
+    "tauri",
+    "svelte",
+    "rust"
+  ],
+  "homepage": "https://github.com/TheEndless/spelunker#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheEndless/spelunker.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TheEndless/spelunker/issues"
+  },
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

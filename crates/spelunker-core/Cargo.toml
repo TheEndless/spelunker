@@ -3,6 +3,11 @@ name = "spelunker-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Search engine behind Spelunker: parallel file content search (literal, whole word, regex) and wildcard name matching with size and date filters"
+keywords = ["search", "grep", "find", "files", "wildcard"]
+categories = ["filesystem", "text-processing"]
 
 [dependencies]
 ignore = "0.4"

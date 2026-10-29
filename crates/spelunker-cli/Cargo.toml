@@ -3,6 +3,11 @@ name = "spelunker-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Command-line harness for the Spelunker search engine: find text inside files and match file names with wildcards"
+keywords = ["search", "grep", "find", "files", "cli"]
+categories = ["command-line-utilities", "filesystem"]
 
 [[bin]]
 name = "spelunker-cli"

@@ -9,3 +9,5 @@ default-members = ["crates/spelunker-core", "crates/spelunker-cli"]
 version = "1.2.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/TheEndless/spelunker"
+homepage = "https://github.com/TheEndless/spelunker"

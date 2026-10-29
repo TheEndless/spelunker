@@ -3,6 +3,11 @@ name = "spelunker-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Spelunker: fast Windows file search that finds text inside files, matches names with wildcards or regex, and maps the results on a treemap"
+keywords = ["search", "grep", "windows", "treemap", "tauri"]
+categories = ["gui", "filesystem"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

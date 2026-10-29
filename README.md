@@ -6,12 +6,11 @@
 
 <p align="center">
   <strong>Fast, keyboard-friendly file search for Windows.</strong><br>
-  Find text inside files and match names with wildcards. Results stream in as they are found.
+  Search inside files, find files by name with wildcards or regex, and see the results on a treemap. No index, no background service, results stream in as they are found.
 </p>
 
 <p align="center">
   <a href="https://github.com/TheEndless/spelunker"><img alt="Repository" src="https://img.shields.io/badge/github-TheEndless%2Fspelunker-181717?logo=github"></a>
-  <img alt="Visibility: private" src="https://img.shields.io/badge/repo-private-lightgrey">
   <a href="https://github.com/TheEndless/spelunker/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v1.2.0-blue"></a>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows11&logoColor=white">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -32,6 +31,30 @@
 
 ---
 
+Spelunker is a free, open-source desktop file search tool for Windows 10 and 11. It is a "find in files" and grep-style GUI: type a word, phrase, or regular expression and it searches the contents of every file under the folders or drives you choose, or match file names with `*` and `?` wildcards, and filter by size and date. Matches show in a built-in preview, and a treemap of the results shows where the hits are and how much space they take. It is written in Rust with a Tauri 2 shell and a Svelte 5 interface, and it reads files directly, so there is nothing to index first.
+
+## Download
+
+Get a package from the [latest release](https://github.com/TheEndless/spelunker/releases/latest):
+
+| Package | For |
+| --- | --- |
+| `Spelunker_<version>_x64-setup.exe` | A per-user install with no administrator prompt. Registers the Explorer right-click entries. |
+| `Spelunker_<version>_x64_en-US.msi` | A per-machine install. Registers the Explorer right-click entries for all users. |
+| `Spelunker-<version>-portable.exe` | No install. |
+
+The packages are not code-signed, so Windows SmartScreen may warn on first run. To build them yourself, see [Build](#build).
+
+The portable exe needs no installer. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Files > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
+
+## Why Spelunker
+
+- **It searches file contents, not just names.** Literal text, whole words, or regex, across whole drives, in the encodings Windows files actually use.
+- **It is fast without an index.** A parallel walk and the same matching engine as ripgrep, streaming into a list that stays smooth past 100,000 rows. Nothing runs in the background between searches.
+- **It shows where the results are.** The results map is a treemap of the matched files, sized by file size or match count and colored by type or age, so a search over a drive doubles as a picture of what is taking the space.
+- **It behaves like a Windows program.** The real Explorer context menu on results, drag files out to any program, "Search with Spelunker" when you right-click a folder or drive, and dates in your regional format.
+- **It is keyboard first and themed properly.** Every pane works without a mouse, and 12 themes each have a designed light and dark variant.
+
 ## What it does
 
 Spelunker is built for the two searches done every day: **text inside files** and **file names with wildcards**. There is no index and no background service. It walks the folders you point it at, in parallel, and shows each hit the moment it is found.
@@ -39,7 +62,7 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Instant feel.** Results stream into a virtualized list that stays smooth past 100,000 rows.
 - **Content search.** Literal, whole word, match case, or regex (including across lines). Reads UTF-8, UTF-8 with BOM, UTF-16 LE/BE, and falls back to Windows-1252. Skips binary files unless asked.
 - **Name search.** `*` and `?` wildcards, several patterns separated by `;` or `,`, and exclusions with a leading `-` (for example `*.log; -*.min.js`). A plain word matches anywhere in the name.
-- **Filters when needed.** Size, modified date, created date, and a name regex, in a panel that stays closed until you need it, with a badge counting what is active.
+- **Filters when needed.** Size, modified date, created date, and multi-line regex, in a panel that stays closed until you need it, with a badge counting what is active. A `.*` chip beside each field switches the name or the text to a regular expression.
 - **Search everywhere.** Pick any folders, or choose **This PC** in the Browse dialog or the Look in list to search every local fixed drive (it shows as `This PC (C:, D:)`, and you can edit the letters).
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
 - **Results map.** A treemap below the results shows where your matches are: rectangle area is file size or match count, color is file type or age. It fills in as the search runs, click a rectangle to select the file, Ctrl+click to zoom into its folder, and `Ctrl+Shift+M` hides it. Tiles are shaded like lit cushions, with a Flat option in Settings.
@@ -51,19 +74,14 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Update check.** **Check for updates** on the About tab asks GitHub for the newest release, and a banner under the toolbar announces a newer one with a **View release** button. Dismissing it hides that version only. The app also checks once a day as it starts, and you can turn that off.
 - **Keyboard first.** Every pane, column, and splitter works without a mouse. Press `F1` in the app for the full list, shown in a dialog grouped by what you are doing.
 
-## Install
+## The results map
 
-Download a package from the [latest release](https://github.com/TheEndless/spelunker/releases/latest):
+Below the results list, a treemap draws one rectangle per matched file, grouped by folder. Rectangle area is file size or match count, and color is file type or file age, your choice. It fills in while the search runs, so a name search like `*` over a drive becomes a live disk usage map of that drive, and a content search shows at a glance which folders hold most of the hits.
 
-| Package | For |
-| --- | --- |
-| `Spelunker_<version>_x64-setup.exe` | A per-user install with no administrator prompt. Registers the Explorer right-click entries. |
-| `Spelunker_<version>_x64_en-US.msi` | A per-machine install. Registers the Explorer right-click entries for all users. |
-| `Spelunker-<version>-portable.exe` | No install. |
-
-The packages are not code-signed, so Windows SmartScreen may warn on first run. To build them yourself, see [Build](#build).
-
-The portable exe needs no installer. On its first run from a normal folder it adds the Explorer entries for the current user, and it repairs them if the file moves. Turn that off under **Settings > Files > Windows Explorer**. Builds run straight from a cargo `target` folder never register themselves.
+- Click a rectangle to select that file in the list and the preview.
+- Ctrl+click a rectangle to zoom into its folder. Press `Backspace` or the **Zoom out** button to come back.
+- `Ctrl+Shift+M` shows or hides the map. Its height is adjustable with the splitter above it.
+- Tiles are shaded like lit cushions by default, with a Flat option in Settings.
 
 ## Using Spelunker
 
@@ -107,6 +125,24 @@ Spelunker.exe "This PC"
 ```
 
 A second launch hands its folders to the window that is already open.
+
+## Questions
+
+**How do I search inside files on Windows?** Type the text in **Containing text**, pick a folder or **This PC**, and press `Enter`. Every match shows its line in the preview. Leave **Name** empty to look in every file, or set it to a pattern such as `*.txt; *.md` to narrow the search.
+
+**Does it support regular expressions?** Yes. Press the `.*` chip beside **Containing text** for a content regex (Rust regex syntax, with a filters panel option to match across lines), or the `.*` chip beside **Name** to match file names with a regex instead of wildcards.
+
+**How are wildcards written?** `*` matches any run of characters and `?` matches one. Separate several patterns with `;` or `,`, and put `-` in front of a pattern to exclude it: `*.log; -*.min.js`. A plain word with no wildcard matches anywhere in the name.
+
+**Does it index my drive?** No. Each search reads the files directly, in parallel, and nothing runs between searches. There is no database to build or keep fresh. By default it skips `.git`, `node_modules`, `$RECYCLE.BIN`, and `System Volume Information`, and hidden and system files unless you turn **Hidden** on.
+
+**Which file encodings can it search?** UTF-8 with or without a BOM, UTF-16 LE and BE, and Windows-1252 as the fallback. Binary files are skipped unless **Binary files** is on. Text inside Office documents, PDFs, and archives is not searched (the preview can still show PDFs and images).
+
+**Can I use it as a disk usage map?** Yes. Search a drive with the name `*` and the results map draws a treemap of every file, sized by file size and colored by type or age.
+
+**Can I save a search or export the results?** Yes. Saved searches live in a menu on the search bar, and `Ctrl+E` exports the result list as CSV or plain text.
+
+**Does it send anything over the network?** Only the update check, which asks GitHub for the newest release number. See [Security notes](#security-notes).
 
 ## Build
 
