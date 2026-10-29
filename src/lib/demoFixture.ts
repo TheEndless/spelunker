@@ -17,17 +17,22 @@ export const DEMO_NOTE_PATH = `${ROOT}\\Clients\\Acme\\Correspondence\\invoice-q
 const MB = 1024 * 1024;
 const DAY_MS = 86_400_000;
 
-type Kind = 'pdf' | 'docx' | 'xlsx' | 'md' | 'png' | 'jpg' | 'eml';
+type Kind = 'pdf' | 'docx' | 'xlsx' | 'md' | 'png' | 'jpg' | 'eml' | 'zip' | 'mp4' | 'pptx' | 'csv' | 'txt';
 
 /** The type name Windows shows, and the size range (log-uniform, in bytes) for each kind of file. */
 const KINDS: Record<Kind, { typeName: string; minSize: number; maxSize: number }> = {
-  pdf: { typeName: 'PDF Document', minSize: 60 * 1024, maxSize: 3 * MB },
-  docx: { typeName: 'Microsoft Word Document', minSize: 30 * 1024, maxSize: 700 * 1024 },
-  xlsx: { typeName: 'Microsoft Excel Worksheet', minSize: 20 * 1024, maxSize: 900 * 1024 },
-  md: { typeName: 'Markdown File', minSize: 2 * 1024, maxSize: 40 * 1024 },
+  pdf: { typeName: 'PDF Document', minSize: 40 * 1024, maxSize: 6 * MB },
+  docx: { typeName: 'Microsoft Word Document', minSize: 12 * 1024, maxSize: 700 * 1024 },
+  xlsx: { typeName: 'Microsoft Excel Worksheet', minSize: 8 * 1024, maxSize: 2 * MB },
+  md: { typeName: 'Markdown File', minSize: 1024, maxSize: 40 * 1024 },
   png: { typeName: 'PNG File', minSize: 300 * 1024, maxSize: 8 * MB },
   jpg: { typeName: 'JPEG Image', minSize: 200 * 1024, maxSize: 4 * MB },
-  eml: { typeName: 'Outlook Item', minSize: 5 * 1024, maxSize: 80 * 1024 },
+  eml: { typeName: 'Outlook Item', minSize: 3 * 1024, maxSize: 80 * 1024 },
+  zip: { typeName: 'Compressed (zipped) Folder', minSize: 3 * MB, maxSize: 90 * MB },
+  mp4: { typeName: 'MP4 Video', minSize: 30 * MB, maxSize: 95 * MB },
+  pptx: { typeName: 'Microsoft PowerPoint Presentation', minSize: 1 * MB, maxSize: 40 * MB },
+  csv: { typeName: 'Microsoft Excel Comma Separated Values File', minSize: 4 * 1024, maxSize: 4 * MB },
+  txt: { typeName: 'Text Document', minSize: 400, maxSize: 30 * 1024 },
 };
 
 const CLIENTS = ['Acme', 'Globex', 'Initech', 'Umbrella', 'Hooli'];
@@ -86,6 +91,14 @@ function entries(random: () => number): Entry[] {
   add('Projects\\site-redesign\\docs', 'invoice-template.docx', 'docx');
   for (const name of ['billing-flow', 'onboarding', 'release-checklist', 'api-notes']) add('Projects\\mobile-app\\specs', `${name}.md`, 'md');
   for (let number = 1; number <= 18; number++) add('Projects\\mobile-app\\design', `mockup-${String(number).padStart(2, '0')}.png`, 'png');
+
+  for (const quarter of ['q1', 'q2', 'q3', 'q4']) add('Finance\\Exports', `invoices-export-${quarter}-2024.csv`, 'csv');
+  for (const client of CLIENTS) add('Finance\\Exports', `invoices-${client.toLowerCase()}-all-time.csv`, 'csv');
+  for (const name of ['pricing', 'kickoff-template', 'quarterly-review', 'pitch', 'training']) add('Presentations', `${name}-invoice-process.pptx`, 'pptx');
+  for (const name of ['todo', 'phone-numbers', 'invoice-reminders', 'ideas', 'passwords-hint', 'shopping', 'travel']) add('Notes', `${name}.txt`, 'txt');
+  for (const quarter of ['2023-q1', '2023-q2', '2023-q3', '2023-q4', '2024-q1']) add('Backups', `invoice-archive-${quarter}.zip`, 'zip');
+  for (const month of ['03', '06', '09']) add('Recordings\\Walkthroughs', `billing-walkthrough-2024-${month}.mp4`, 'mp4');
+  add('Recordings\\Walkthroughs', 'invoice-system-demo-full.mp4', 'mp4', 100 * MB);
 
   add('Archive\\2022', 'year-end-report.pdf', 'pdf', 48 * MB);
   add('Archive\\2022', 'scans-2022.pdf', 'pdf', 22 * MB);

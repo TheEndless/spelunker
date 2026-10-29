@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEMO_NOTE_PATH, DEMO_QUERY, demoPreview, demoRows } from './demoFixture';
 
 const NOW = Date.UTC(2026, 5, 15, 12, 0, 0);
+const MB = 1024 * 1024;
 
 describe('the demo fixture', () => {
   it('is the same every time it is made for the same moment', () => {
@@ -18,7 +19,7 @@ describe('the demo fixture', () => {
   it('is big enough to fill a map, with each path once and a hit in every file', () => {
     const rows = demoRows(NOW);
     expect(rows.length).toBeGreaterThanOrEqual(250);
-    expect(rows.length).toBeLessThanOrEqual(450);
+    expect(rows.length).toBeLessThanOrEqual(500);
     expect(new Set(rows.map((row) => row.path)).size).toBe(rows.length);
     for (const row of rows) expect(row.hits, row.path).toBeGreaterThanOrEqual(1);
   });
@@ -28,6 +29,15 @@ describe('the demo fixture', () => {
     expect(new Set(rows.map((row) => row.typeName)).size).toBeGreaterThanOrEqual(6);
     expect(rows.some((row) => row.size > 40 * 1024 * 1024)).toBe(true);
     expect(rows.filter((row) => row.size < 100 * 1024).length).toBeGreaterThan(40);
+  });
+
+  it('puts files in the size bands from tiny to 64 MB and over, with none so big it swamps the map', () => {
+    const rows = demoRows(NOW);
+    const limits = [16 * 1024, 256 * 1024, 4 * MB, 64 * MB];
+    const bandOf = (size: number) => limits.filter((limit) => size >= limit).length;
+    expect([...new Set(rows.map((row) => bandOf(row.size)))].sort()).toEqual([0, 1, 2, 3, 4]);
+    const total = rows.reduce((sum, row) => sum + row.size, 0);
+    expect(Math.max(...rows.map((row) => row.size))).toBeLessThan(total / 6);
   });
 
   it('lists the folders in name order, as a search does', () => {
