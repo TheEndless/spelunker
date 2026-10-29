@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/TheEndless/spelunker"><img alt="Repository" src="https://img.shields.io/badge/github-TheEndless%2Fspelunker-181717?logo=github"></a>
-  <a href="https://github.com/TheEndless/spelunker/releases/latest"><img alt="Latest release" src="https://img.shields.io/badge/release-v1.2.0-blue"></a>
+  <a href="https://github.com/TheEndless/spelunker/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/TheEndless/spelunker?label=release&color=blue"></a>
   <img alt="Platform: Windows" src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?logo=windows11&logoColor=white">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green"></a>
 </p>
