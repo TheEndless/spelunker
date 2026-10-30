@@ -30,6 +30,7 @@ const request = {
   maxDepth: null,
   includeHidden: false,
   includeBinary: false,
+  searchDocuments: false,
   followLinks: false,
   respectGitignore: false,
   minSize: null,

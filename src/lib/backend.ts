@@ -12,6 +12,7 @@ export interface SearchRequest {
   maxDepth: number | null;
   includeHidden: boolean;
   includeBinary: boolean;
+  searchDocuments: boolean;
   followLinks: boolean;
   respectGitignore: boolean;
   nameIsRegex: boolean;

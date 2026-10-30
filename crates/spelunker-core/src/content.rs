@@ -1,5 +1,6 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
+use crate::document_text::{extract_text, is_document};
 use crate::model::{ConfigError, Hit, PreviewLine};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
 use grep_matcher::Matcher;
@@ -78,9 +79,44 @@ impl ContentMatcher {
         }
     }
 
+    /// Searches the text of an Office or OpenDocument file instead of its bytes.
+    pub fn search_document(&self, path: &Path, cancel: &CancelToken) -> io::Result<ContentOutcome> {
+        let text = match extract_text(path, cancel) {
+            Ok(text) => text,
+            Err(_) if cancel.is_cancelled() => return Ok(ContentOutcome::Cancelled),
+            Err(error) => return Err(error),
+        };
+        let mut collector = HitCollector {
+            matcher: &self.matcher,
+            cancel,
+            hits: Vec::new(),
+            binary_seen: false,
+        };
+        self.searcher(0, None, BinaryDetection::none())
+            .search_slice(&self.matcher, text.as_bytes(), &mut collector)?;
+        Ok(if cancel.is_cancelled() {
+            ContentOutcome::Cancelled
+        } else {
+            ContentOutcome::Hits(collector.hits)
+        })
+    }
+
     /// Every matching line plus `context_lines` of surrounding lines. Empty for binary files
-    /// unless binary search is enabled.
+    /// unless binary search is enabled. The text of an Office or OpenDocument file is shown as
+    /// text whatever the binary setting, since it is read on request and not walked past.
     pub fn preview_file(&self, path: &Path, context_lines: usize) -> io::Result<Vec<PreviewLine>> {
+        if is_document(path) {
+            let text = extract_text(path, &CancelToken::new())?;
+            let mut collector = PreviewCollector {
+                matcher: &self.matcher,
+                lines: Vec::new(),
+                binary_seen: false,
+            };
+            self.searcher(context_lines, None, BinaryDetection::none())
+                .search_slice(&self.matcher, text.as_bytes(), &mut collector)
+                .map_err(io::Error::other)?;
+            return Ok(collector.lines);
+        }
         let (mut searcher, file) = self.open(path, context_lines)?;
         let mut collector = PreviewCollector {
             matcher: &self.matcher,
@@ -116,18 +152,27 @@ impl ContentMatcher {
             }
             None => None,
         };
-        let searcher = SearcherBuilder::new()
+        let binary = if self.include_binary {
+            BinaryDetection::none()
+        } else {
+            BinaryDetection::quit(b'\0')
+        };
+        Ok((self.searcher(context_lines, encoding, binary), file))
+    }
+
+    fn searcher(
+        &self,
+        context_lines: usize,
+        encoding: Option<SearcherEncoding>,
+        binary: BinaryDetection,
+    ) -> Searcher {
+        SearcherBuilder::new()
             .encoding(encoding)
             .before_context(context_lines)
             .after_context(context_lines)
             .multi_line(self.multi_line)
-            .binary_detection(if self.include_binary {
-                BinaryDetection::none()
-            } else {
-                BinaryDetection::quit(b'\0')
-            })
-            .build();
-        Ok((searcher, file))
+            .binary_detection(binary)
+            .build()
     }
 }
 

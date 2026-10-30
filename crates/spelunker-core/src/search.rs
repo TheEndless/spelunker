@@ -2,6 +2,7 @@ use crate::binary_extensions::has_binary_extension;
 use crate::cancel::CancelToken;
 use crate::config::SearchConfig;
 use crate::content::{ContentMatcher, ContentOutcome};
+use crate::document_text::is_document;
 use crate::gate::Gate;
 use crate::model::{ConfigError, FileResult, SearchError, SearchEvent, SearchSummary};
 use crate::name_filter::NameFilter;
@@ -357,13 +358,18 @@ impl<F: Fn(SearchEvent)> Shared<F> {
         };
 
         if let Some(content_matcher) = &self.content_matcher {
-            // Skip known binary types without opening them. An open can block on antivirus for
-            // seconds and cannot be cancelled, and the content check would discard them anyway.
-            if !config.include_binary && has_binary_extension(entry.path()) {
-                self.count_binary_skipped();
-                return;
-            }
-            match content_matcher.search_file(entry.path(), &self.cancel) {
+            let searched = if config.search_documents && is_document(entry.path()) {
+                content_matcher.search_document(entry.path(), &self.cancel)
+            } else {
+                // Skip known binary types without opening them. An open can block on antivirus for
+                // seconds and cannot be cancelled, and the content check would discard them anyway.
+                if !config.include_binary && has_binary_extension(entry.path()) {
+                    self.count_binary_skipped();
+                    return;
+                }
+                content_matcher.search_file(entry.path(), &self.cancel)
+            };
+            match searched {
                 Ok(ContentOutcome::Hits(hits)) if hits.is_empty() => return,
                 Ok(ContentOutcome::Hits(hits)) => result.hits = hits,
                 Ok(ContentOutcome::Binary) => {

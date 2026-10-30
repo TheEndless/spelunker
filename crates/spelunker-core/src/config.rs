@@ -88,6 +88,9 @@ pub struct SearchConfig {
     /// Files and folders with the hidden or system attribute (or a leading dot).
     pub include_hidden: bool,
     pub include_binary: bool,
+    /// Look inside Office and OpenDocument files (docx, xlsx, pptx, odt, ods, odp) for the text, which
+    /// are otherwise skipped as binary. The files are read as zip archives and only their text parts are opened.
+    pub search_documents: bool,
     /// Descend into junctions and symlinked folders. Loops are detected and reported as errors.
     pub follow_links: bool,
     /// Skip what git would ignore: the `.gitignore` files of the repositories the search passes
@@ -114,6 +117,7 @@ impl SearchConfig {
                 .collect(),
             include_hidden: false,
             include_binary: false,
+            search_documents: false,
             follow_links: false,
             respect_gitignore: false,
         }

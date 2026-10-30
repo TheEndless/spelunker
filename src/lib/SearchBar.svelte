@@ -184,6 +184,9 @@
             <label class="option" title="Also search inside binary files, not only text"
               ><input type="checkbox" bind:checked={criteria.includeBinary} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Binary files</label
             >
+            <label class="option" title="Also search the text inside Word, Excel and PowerPoint files and their OpenDocument equivalents (docx, xlsx, pptx, odt, ods, odp)"
+              ><input type="checkbox" bind:checked={criteria.searchDocuments} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Documents</label
+            >
           </div>
         </div>
       </div>

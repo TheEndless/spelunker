@@ -60,7 +60,7 @@ The portable exe needs no installer. On its first run from a normal folder it ad
 Spelunker is built for the two searches done every day: **text inside files** and **file names with wildcards**. There is no index and no background service. It walks the folders you point it at, in parallel, and shows each hit the moment it is found.
 
 - **Instant feel.** Results stream into a virtualized list that stays smooth past 100,000 rows.
-- **Content search.** Literal, whole word, match case, or regex (including across lines). Reads UTF-8, UTF-8 with BOM, UTF-16 LE/BE, and falls back to Windows-1252. Skips binary files unless asked.
+- **Content search.** Literal, whole word, match case, or regex (including across lines). Reads UTF-8, UTF-8 with BOM, UTF-16 LE/BE, and falls back to Windows-1252. Skips binary files unless asked, and looks inside Word, Excel, PowerPoint and OpenDocument files when **Documents** is on.
 - **Name search.** `*` and `?` wildcards, several patterns separated by `;` or `,`, and exclusions with a leading `-` (for example `*.log; -*.min.js`). A plain word matches anywhere in the name.
 - **Filters when needed.** Size, modified date, created date, multi-line regex, and skipping what `.gitignore` files name, in a panel that stays closed until you need it, with a badge counting what is active. A `.*` chip beside each field switches the name or the text to a regular expression.
 - **Search everywhere.** Pick any folders, or choose **This PC** in the Browse dialog or the Look in list to search every local fixed drive (it shows as `This PC (C:, D:)`, and you can edit the letters).
@@ -138,7 +138,9 @@ A second launch hands its folders to the window that is already open.
 
 **Can it skip files that git ignores?** Yes. Open **Filters** and turn on **Git ignore**. Spelunker then leaves out what the `.gitignore` files, `.git/info/exclude`, and your global git ignore file name, in every repository the search passes through, and in the one a start folder lies inside. As in git, a `.gitignore` in a folder that is not inside a repository does nothing. It is off by default, because a search of a folder should find what is in it.
 
-**Which file encodings can it search?** UTF-8 with or without a BOM, UTF-16 LE and BE, and Windows-1252 as the fallback. Binary files are skipped unless **Binary files** is on. Text inside Office documents, PDFs, and archives is not searched (the preview can still show PDFs and images).
+**Can it search inside Word, Excel and PowerPoint files?** Yes. Turn on **Documents** beside the other Include options and Spelunker reads the text out of `.docx`, `.xlsx`, `.pptx` (and the macro and template variants) and the OpenDocument `.odt`, `.ods` and `.odp`. It opens the file as the zip archive it is and reads only the parts that hold text, so Word, Excel and PowerPoint do not need to be installed. A paragraph is a line, a spreadsheet row is a line with its cells separated by tabs, and a slide's text and notes come in slide order. The preview shows the same text, with the matches marked. Formatting, images, formulas (only their stored results are read), the older `.doc`, `.xls` and `.ppt` formats and password-protected files are not searched, and a file that cannot be read is listed with the errors. It is off by default because opening a document costs more than reading a text file.
+
+**Which file encodings can it search?** UTF-8 with or without a BOM, UTF-16 LE and BE, and Windows-1252 as the fallback. Binary files are skipped unless **Binary files** is on. Text inside PDFs and archives is not searched (the preview can still show PDFs and images).
 
 **Can I use it as a disk usage map?** Yes. Search a drive with the name `*` and the results map draws a treemap of every file, sized by file size and colored by type or age.
 

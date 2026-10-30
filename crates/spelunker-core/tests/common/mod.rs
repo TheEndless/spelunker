@@ -182,3 +182,20 @@ pub fn write_long_path_file(root: &Path, file_name: &str, bytes: &[u8]) -> PathB
     fs::write(&path, bytes).unwrap();
     path
 }
+
+/// Writes a zip archive (what Office and OpenDocument files are) holding the given named parts.
+/// Parts are deflated, as real documents are.
+pub fn write_zip(root: &Path, relative: &str, parts: &[(&str, &str)]) -> PathBuf {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut archive = zip::ZipWriter::new(fs::File::create(&path).unwrap());
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, content) in parts {
+        archive.start_file(*name, options).unwrap();
+        archive.write_all(content.as_bytes()).unwrap();
+    }
+    archive.finish().unwrap();
+    path
+}

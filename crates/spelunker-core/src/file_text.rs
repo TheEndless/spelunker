@@ -1,5 +1,7 @@
 use crate::config::ContentQuery;
+use crate::cancel::CancelToken;
 use crate::content::{detect_encoding, ContentMatcher};
+use crate::document_text::{extract_text, is_document};
 use crate::model::PreviewLine;
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use std::fs::File;
@@ -23,6 +25,11 @@ pub fn read_file_text(
     query: Option<&ContentQuery>,
     max_bytes: usize,
 ) -> io::Result<FileText> {
+    if is_document(path) {
+        let text = extract_text(path, &CancelToken::new())?;
+        let (shown, truncated) = first_lines(&text, max_bytes);
+        return Ok(build(shown, query, truncated));
+    }
     let mut bytes = Vec::new();
     // One byte past the limit tells a file of exactly the limit from a longer one.
     File::open(path)?
@@ -57,6 +64,19 @@ pub fn read_file_text(
     }
     let (decoded, _) = encoding.decode_without_bom_handling(body);
     Ok(build(&decoded, query, false))
+}
+
+/// The start of `text` that fits in `max_bytes`, cut after a whole line when it has to be cut.
+fn first_lines(text: &str, max_bytes: usize) -> (&str, bool) {
+    if text.len() <= max_bytes {
+        return (text, false);
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let whole_lines = text[..end].rfind('\n').map_or(end, |index| index + 1);
+    (&text[..whole_lines], true)
 }
 
 /// The byte offset just after the last line break, found on character boundaries. In UTF-16 a

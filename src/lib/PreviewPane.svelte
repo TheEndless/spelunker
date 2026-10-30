@@ -57,6 +57,8 @@
   const kind = $derived(file ? previewKind(file.name) : 'other');
   const hasContentQuery = $derived(query !== null && query.text !== '');
   const isText = $derived(file !== null && kind === 'text');
+  /** Text is shown for it: a file read as text, or the words taken out of an Office or OpenDocument file. */
+  const showsText = $derived(isText || (file !== null && kind === 'office'));
   const cappedLines = $derived(mode === 'matches' && lines.length > MAX_MATCH_VIEW_LINES ? lines.slice(0, MAX_MATCH_VIEW_LINES) : lines);
   const shownLines = $derived<PreviewLine[]>(mode === 'file' ? (fileText?.lines ?? []) : cappedLines);
   const hitLineNumbers = $derived(shownLines.filter((line) => line.isMatch).map((line) => line.lineNumber));
@@ -114,7 +116,7 @@
     fileText = null;
     loadError = null;
     loading = false;
-    if (!path || !isText) return;
+    if (!path || !showsText) return;
     if (wanted === 'matches' && (!currentQuery || currentQuery.text === '')) return;
 
     let stale = false;
@@ -208,6 +210,13 @@
   /** The line that "Open in editor" should jump to: the current match, else the top of the file. */
   const editorLine = $derived(hitLineNumbers[activeHit] ?? 1);
 
+  /** A line is a place in a text file for an editor, but an Office file has no such place, so it is simply opened. */
+  function openAtLine(line: number) {
+    if (!file) return;
+    if (isText) onOpenInEditor(file.path, line);
+    else onOpen(file);
+  }
+
   function onImageLoad(event: Event) {
     const image = event.currentTarget as HTMLImageElement;
     imageSize = `${image.naturalWidth} × ${image.naturalHeight} px`;
@@ -243,7 +252,7 @@
       <Icon name="chevron-right" />
     </button>
   </div>
-  {#if isText && (hasContentQuery || mode === 'matches')}
+  {#if showsText && (hasContentQuery || mode === 'matches')}
     <div class="viewtools">
       {#if hasContentQuery}
         <span class="modes" role="group" aria-label="What to show">
@@ -383,9 +392,9 @@
               class="line"
               class:match={line.isMatch}
               class:active={line.isMatch && hitLineNumbers[activeHit] === line.lineNumber}
-              title="Click to see this line in the whole file. Double-click to open it in your editor."
+              title="Click to see this line in the whole file. Double-click to open {isText ? 'it in your editor' : 'the file'}."
               onclick={() => showWholeFile(line.lineNumber)}
-              ondblclick={() => onOpenInEditor(file.path, line.lineNumber)}
+              ondblclick={() => openAtLine(line.lineNumber)}
             >
               <span class="number">{line.lineNumber}</span>
               <span class="text">
@@ -412,7 +421,7 @@
                   class:match={line.isMatch}
                   class:active={line.isMatch && hitLineNumbers[activeHit] === line.lineNumber}
                   style:height="{LINE_HEIGHT}px"
-                  ondblclick={() => onOpenInEditor(file.path, line.lineNumber)}
+                  ondblclick={() => openAtLine(line.lineNumber)}
                 >
                   <span class="number">{line.lineNumber}</span>
                   <span class="text">

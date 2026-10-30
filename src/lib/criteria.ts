@@ -24,6 +24,8 @@ export interface Criteria {
   subfolders: boolean;
   includeHidden: boolean;
   includeBinary: boolean;
+  /** Look at the text inside Office and OpenDocument files (docx, xlsx, pptx, odt, ods, odp). */
+  searchDocuments: boolean;
   followLinks: boolean;
   /** Skip what the .gitignore files of the repositories searched name. */
   respectGitignore: boolean;
@@ -44,6 +46,7 @@ export const DEFAULT_CRITERIA: Criteria = {
   subfolders: true,
   includeHidden: false,
   includeBinary: false,
+  searchDocuments: false,
   followLinks: false,
   respectGitignore: false,
   size: emptySizeFilter(),
@@ -110,6 +113,7 @@ export function normalizeCriteria(raw: unknown): Criteria {
     subfolders: pick(source, 'subfolders', defaults.subfolders),
     includeHidden: pick(source, 'includeHidden', defaults.includeHidden),
     includeBinary: pick(source, 'includeBinary', defaults.includeBinary),
+    searchDocuments: pick(source, 'searchDocuments', defaults.searchDocuments),
     followLinks: pick(source, 'followLinks', defaults.followLinks),
     respectGitignore: pick(source, 'respectGitignore', defaults.respectGitignore),
     size: normalizeSize(source.size),

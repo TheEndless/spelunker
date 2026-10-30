@@ -42,6 +42,9 @@ pub struct SearchRequest {
     pub max_depth: Option<usize>,
     pub include_hidden: bool,
     pub include_binary: bool,
+    /// Search the text inside Office and OpenDocument files. Absent in requests from before this option existed.
+    #[serde(default)]
+    pub search_documents: bool,
     pub follow_links: bool,
     /// Skip what git would ignore. Absent in requests from before this option existed.
     #[serde(default)]
@@ -120,6 +123,7 @@ impl SearchRequest {
         config.max_depth = self.max_depth;
         config.include_hidden = self.include_hidden;
         config.include_binary = self.include_binary;
+        config.search_documents = self.search_documents;
         config.follow_links = self.follow_links;
         config.respect_gitignore = self.respect_gitignore;
         config
@@ -420,6 +424,23 @@ mod tests {
         };
         assert!(!request("").respect_gitignore, "an older request has no such field");
         assert!(request(r#", "respectGitignore": true"#).respect_gitignore);
+    }
+
+    #[test]
+    fn documents_are_searched_only_when_the_request_says_so() {
+        let request = |extra: &str| {
+            let json = format!(
+                r#"{{"roots": ["C:/x"], "namePatterns": "", "query": {{"text": "", "matchCase": false, "wholeWord": false, "regex": false, "multiLine": false}},
+                "recurse": true, "maxDepth": null, "includeHidden": false, "includeBinary": false, "followLinks": false{extra},
+                "nameIsRegex": false, "minSize": null, "maxSize": null,
+                "modified": {{"fromMs": null, "toMs": null}}, "created": {{"fromMs": null, "toMs": null}}}}"#
+            );
+            serde_json::from_str::<SearchRequest>(&json)
+                .unwrap()
+                .into_config()
+        };
+        assert!(!request("").search_documents, "an older request has no such field");
+        assert!(request(r#", "searchDocuments": true"#).search_documents);
     }
 
     #[test]

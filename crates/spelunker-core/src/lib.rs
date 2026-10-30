@@ -5,6 +5,7 @@ mod binary_extensions;
 mod cancel;
 mod config;
 mod content;
+mod document_text;
 mod file_text;
 mod gate;
 mod model;

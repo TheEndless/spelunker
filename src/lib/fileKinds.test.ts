@@ -43,8 +43,14 @@ describe('previewKind', () => {
   });
 
   it('describes known binary formats instead of trying to read them', () => {
-    for (const name of ['a.zip', 'b.exe', 'c.dll', 'd.docx', 'e.xlsx', 'f.pptx', 'g.7z', 'h.iso']) {
+    for (const name of ['a.zip', 'b.exe', 'c.dll', 'g.7z', 'h.iso', 'old.doc', 'old.xls', 'old.ppt']) {
       expect(previewKind(name), name).toBe('other');
+    }
+  });
+
+  it('shows the text of Office and OpenDocument files, which the engine can read', () => {
+    for (const name of ['d.docx', 'e.XLSX', 'f.pptx', 'g.odt', 'h.ods', 'i.odp', 'j.docm', 'k.potx']) {
+      expect(previewKind(name), name).toBe('office');
     }
   });
 

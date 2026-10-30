@@ -55,6 +55,7 @@ export function buildSearchRequest(criteria: Criteria, nowMs: number): Resolved<
       maxDepth: null,
       includeHidden: criteria.includeHidden,
       includeBinary: criteria.includeBinary,
+      searchDocuments: criteria.searchDocuments,
       followLinks: criteria.followLinks,
       respectGitignore: criteria.respectGitignore,
       minSize: size.value.min,
