@@ -206,9 +206,15 @@ fn walk_in_parallel<F>(
 fn build_walker(root: &Path, config: &SearchConfig, levels_below: Option<usize>) -> WalkBuilder {
     let mut builder = WalkBuilder::new(root);
 
-    // Spelunker searches everything the user points it at, so ignore files such as .gitignore do not apply.
+    // Spelunker searches everything the user points it at, so ignore files such as .gitignore only
+    // apply when asked for. The ignore files of the folders above the start folder count too: a
+    // search of src inside a repository still follows the repository's .gitignore.
     builder
         .standard_filters(false)
+        .git_ignore(config.respect_gitignore)
+        .git_global(config.respect_gitignore)
+        .git_exclude(config.respect_gitignore)
+        .parents(config.respect_gitignore)
         .hidden(!config.include_hidden)
         // With links followed, the walker compares each folder against its ancestors and reports
         // a loop as an error instead of descending into it again.
@@ -232,6 +238,44 @@ fn build_walker(root: &Path, config: &SearchConfig, levels_below: Option<usize>)
         !is_excluded_dir && (include_system || !has_system_attribute(entry))
     });
     builder
+}
+
+/// Whether a search of `outer` that respects `.gitignore` files would reach the folder `inner`
+/// inside it. Only the folders between the two are looked at, with the same walker a search uses,
+/// so what git ignores, the hidden filter and links are all judged the way the search judges them.
+/// Case and slash direction do not matter.
+pub fn gitignore_reaches(
+    outer: &Path,
+    inner: &Path,
+    include_hidden: bool,
+    follow_links: bool,
+) -> bool {
+    let target = comparable(inner);
+    let start = comparable(outer);
+    if !target.starts_with(&start) {
+        return false;
+    }
+    let depth = target.components().count() - start.components().count();
+    let way_to_inner = target.clone();
+    WalkBuilder::new(outer)
+        .standard_filters(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .parents(true)
+        .hidden(!include_hidden)
+        .follow_links(follow_links)
+        .max_depth(Some(depth))
+        .filter_entry(move |entry| way_to_inner.starts_with(comparable(entry.path())))
+        .build()
+        .flatten()
+        .any(|entry| comparable(entry.path()) == target)
+}
+
+/// A path as Windows compares it: lowercase, with backslashes and no trailing separator.
+fn comparable(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    PathBuf::from(text.trim_end_matches('\\'))
 }
 
 /// The walker's hidden filter only looks at the hidden attribute, but the spec treats system

@@ -14,7 +14,8 @@ describe('countActiveFilters', () => {
     criteria.modified.mode = 'within';
     criteria.created.mode = 'before';
     criteria.multiLine = true;
-    expect(countActiveFilters(criteria)).toBe(4);
+    criteria.respectGitignore = true;
+    expect(countActiveFilters(criteria)).toBe(5);
   });
 
   it('does not count ordinary search options as filters', () => {

@@ -31,6 +31,7 @@ const request = {
   includeHidden: false,
   includeBinary: false,
   followLinks: false,
+  respectGitignore: false,
   minSize: null,
   maxSize: null,
   modified: { fromMs: null, toMs: null },

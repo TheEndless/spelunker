@@ -1,7 +1,7 @@
 import type { Criteria } from './criteria';
 import { emptyDateFilter, emptySizeFilter, type DateFilter, type DateUnit, type SizeFilter } from './filters';
 
-export type FilterId = 'size' | 'modified' | 'created' | 'multiLine';
+export type FilterId = 'size' | 'modified' | 'created' | 'multiLine' | 'respectGitignore';
 
 export interface FilterSummaryItem {
   id: FilterId;
@@ -57,10 +57,11 @@ export function summarizeFilters(criteria: Criteria): FilterSummaryItem[] {
     items.push({ id: 'created', label: describeDate('Created', criteria.created) });
   }
   if (criteria.multiLine) items.push({ id: 'multiLine', label: 'Multi-line' });
+  if (criteria.respectGitignore) items.push({ id: 'respectGitignore', label: 'Skip git-ignored files' });
   return items;
 }
 
-const FILTER_IDS: readonly FilterId[] = ['size', 'modified', 'created', 'multiLine'];
+const FILTER_IDS: readonly FilterId[] = ['size', 'modified', 'created', 'multiLine', 'respectGitignore'];
 
 /** Returns new criteria with only the given filter switched off and its inputs reset. */
 export function clearFilter(criteria: Criteria, id: FilterId): Criteria {
@@ -83,6 +84,9 @@ export function clearFilter(criteria: Criteria, id: FilterId): Criteria {
       break;
     case 'multiLine':
       cleared.multiLine = false;
+      break;
+    case 'respectGitignore':
+      cleared.respectGitignore = false;
       break;
   }
   return cleared;

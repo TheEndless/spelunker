@@ -147,6 +147,16 @@
     </div>
   </div>
 
+  <div class="row">
+    <label class="head" title="Leave out files and folders that .gitignore files, .git/info/exclude and your global git ignore file name. Applies inside git repositories only, as in git.">
+      <input type="checkbox" bind:checked={criteria.respectGitignore} />
+      Git ignore
+    </label>
+    <div class="controls">
+      <span class="note">Skip what .gitignore files name, inside git repositories</span>
+    </div>
+  </div>
+
   {#if activeCount > 0}
     <div class="footer">
       <button type="button" class="clear" onclick={onClearAll}>Clear filters</button>

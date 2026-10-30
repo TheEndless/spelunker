@@ -22,6 +22,7 @@ describe('buildSearchRequest', () => {
         includeHidden: true,
         includeBinary: true,
         followLinks: true,
+        respectGitignore: true,
       }),
       NOW,
     );
@@ -36,6 +37,7 @@ describe('buildSearchRequest', () => {
       includeHidden: true,
       includeBinary: true,
       followLinks: true,
+      respectGitignore: true,
     });
   });
 

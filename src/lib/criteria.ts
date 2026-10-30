@@ -25,6 +25,8 @@ export interface Criteria {
   includeHidden: boolean;
   includeBinary: boolean;
   followLinks: boolean;
+  /** Skip what the .gitignore files of the repositories searched name. */
+  respectGitignore: boolean;
   size: SizeFilter;
   modified: DateFilter;
   created: DateFilter;
@@ -43,6 +45,7 @@ export const DEFAULT_CRITERIA: Criteria = {
   includeHidden: false,
   includeBinary: false,
   followLinks: false,
+  respectGitignore: false,
   size: emptySizeFilter(),
   modified: emptyDateFilter(),
   created: emptyDateFilter(),
@@ -108,6 +111,7 @@ export function normalizeCriteria(raw: unknown): Criteria {
     includeHidden: pick(source, 'includeHidden', defaults.includeHidden),
     includeBinary: pick(source, 'includeBinary', defaults.includeBinary),
     followLinks: pick(source, 'followLinks', defaults.followLinks),
+    respectGitignore: pick(source, 'respectGitignore', defaults.respectGitignore),
     size: normalizeSize(source.size),
     modified: normalizeDate(source.modified),
     created: normalizeDate(source.created),
@@ -121,5 +125,6 @@ export function countActiveFilters(criteria: Criteria): number {
     modified: criteria.modified,
     created: criteria.created,
     multiLine: criteria.multiLine,
+    respectGitignore: criteria.respectGitignore,
   });
 }

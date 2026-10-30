@@ -6,7 +6,7 @@ use spelunker_core::{
     ContentQuery, FileResult, PreviewLine, SearchConfig, SearchSummary, SizeRange, TimeRange,
 };
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 #[derive(Deserialize)]
@@ -43,6 +43,9 @@ pub struct SearchRequest {
     pub include_hidden: bool,
     pub include_binary: bool,
     pub follow_links: bool,
+    /// Skip what git would ignore. Absent in requests from before this option existed.
+    #[serde(default)]
+    pub respect_gitignore: bool,
     /// When set, `name_patterns` is a regex on the file name instead of a wildcard list.
     pub name_is_regex: bool,
     pub min_size: Option<u64>,
@@ -92,6 +95,13 @@ impl SearchRequest {
                     self.include_hidden,
                     self.follow_links,
                 )
+                && (!self.respect_gitignore
+                    || spelunker_core::gitignore_reaches(
+                        Path::new(outer),
+                        Path::new(inner),
+                        self.include_hidden,
+                        self.follow_links,
+                    ))
         });
         let mut config = SearchConfig::new(roots.into_iter().map(PathBuf::from).collect());
         if self.name_is_regex {
@@ -111,6 +121,7 @@ impl SearchRequest {
         config.include_hidden = self.include_hidden;
         config.include_binary = self.include_binary;
         config.follow_links = self.follow_links;
+        config.respect_gitignore = self.respect_gitignore;
         config
     }
 }
@@ -392,6 +403,23 @@ mod tests {
         );
         let query = config.content.unwrap();
         assert!(query.regex && query.multi_line && query.match_case);
+    }
+
+    #[test]
+    fn ignore_files_are_respected_only_when_the_request_says_so() {
+        let request = |extra: &str| {
+            let json = format!(
+                r#"{{"roots": ["C:/x"], "namePatterns": "", "query": {{"text": "", "matchCase": false, "wholeWord": false, "regex": false, "multiLine": false}},
+                "recurse": true, "maxDepth": null, "includeHidden": false, "includeBinary": false, "followLinks": false{extra},
+                "nameIsRegex": false, "minSize": null, "maxSize": null,
+                "modified": {{"fromMs": null, "toMs": null}}, "created": {{"fromMs": null, "toMs": null}}}}"#
+            );
+            serde_json::from_str::<SearchRequest>(&json)
+                .unwrap()
+                .into_config()
+        };
+        assert!(!request("").respect_gitignore, "an older request has no such field");
+        assert!(request(r#", "respectGitignore": true"#).respect_gitignore);
     }
 
     #[test]

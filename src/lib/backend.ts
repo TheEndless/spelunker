@@ -13,6 +13,7 @@ export interface SearchRequest {
   includeHidden: boolean;
   includeBinary: boolean;
   followLinks: boolean;
+  respectGitignore: boolean;
   nameIsRegex: boolean;
   minSize: number | null;
   maxSize: number | null;

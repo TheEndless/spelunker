@@ -56,6 +56,7 @@ export function buildSearchRequest(criteria: Criteria, nowMs: number): Resolved<
       includeHidden: criteria.includeHidden,
       includeBinary: criteria.includeBinary,
       followLinks: criteria.followLinks,
+      respectGitignore: criteria.respectGitignore,
       minSize: size.value.min,
       maxSize: size.value.max,
       modified: modified.value,

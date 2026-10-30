@@ -62,7 +62,7 @@ Spelunker is built for the two searches done every day: **text inside files** an
 - **Instant feel.** Results stream into a virtualized list that stays smooth past 100,000 rows.
 - **Content search.** Literal, whole word, match case, or regex (including across lines). Reads UTF-8, UTF-8 with BOM, UTF-16 LE/BE, and falls back to Windows-1252. Skips binary files unless asked.
 - **Name search.** `*` and `?` wildcards, several patterns separated by `;` or `,`, and exclusions with a leading `-` (for example `*.log; -*.min.js`). A plain word matches anywhere in the name.
-- **Filters when needed.** Size, modified date, created date, and multi-line regex, in a panel that stays closed until you need it, with a badge counting what is active. A `.*` chip beside each field switches the name or the text to a regular expression.
+- **Filters when needed.** Size, modified date, created date, multi-line regex, and skipping what `.gitignore` files name, in a panel that stays closed until you need it, with a badge counting what is active. A `.*` chip beside each field switches the name or the text to a regular expression.
 - **Search everywhere.** Pick any folders, or choose **This PC** in the Browse dialog or the Look in list to search every local fixed drive (it shows as `This PC (C:, D:)`, and you can edit the letters).
 - **Built-in preview.** Matching lines with context, a full scrollable view of the file with next/previous hit, and rendered previews for images, PDFs, audio, and video. The preview is resizable and collapsible.
 - **Results map.** A treemap below the results shows where your matches are: rectangle area is file size or match count, color is file type or age. It fills in as the search runs, click a rectangle to select the file, Ctrl+click to zoom into its folder, and `Ctrl+Shift+M` hides it. Tiles are shaded like lit cushions, with a Flat option in Settings.
@@ -135,6 +135,8 @@ A second launch hands its folders to the window that is already open.
 **How are wildcards written?** `*` matches any run of characters and `?` matches one. Separate several patterns with `;` or `,`, and put `-` in front of a pattern to exclude it: `*.log; -*.min.js`. A plain word with no wildcard matches anywhere in the name.
 
 **Does it index my drive?** No. Each search reads the files directly, in parallel, and nothing runs between searches. There is no database to build or keep fresh. By default it skips `.git`, `node_modules`, `$RECYCLE.BIN`, and `System Volume Information`, and hidden and system files unless you turn **Hidden** on.
+
+**Can it skip files that git ignores?** Yes. Open **Filters** and turn on **Git ignore**. Spelunker then leaves out what the `.gitignore` files, `.git/info/exclude`, and your global git ignore file name, in every repository the search passes through, and in the one a start folder lies inside. As in git, a `.gitignore` in a folder that is not inside a repository does nothing. It is off by default, because a search of a folder should find what is in it.
 
 **Which file encodings can it search?** UTF-8 with or without a BOM, UTF-16 LE and BE, and Windows-1252 as the fallback. Binary files are skipped unless **Binary files** is on. Text inside Office documents, PDFs, and archives is not searched (the preview can still show PDFs and images).
 

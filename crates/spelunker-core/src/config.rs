@@ -90,6 +90,10 @@ pub struct SearchConfig {
     pub include_binary: bool,
     /// Descend into junctions and symlinked folders. Loops are detected and reported as errors.
     pub follow_links: bool,
+    /// Skip what git would ignore: the `.gitignore` files of the repositories the search passes
+    /// through (and of the one a start folder lies inside), the repository's `.git/info/exclude`,
+    /// and the user's global ignore file. As in git, a `.gitignore` outside any repository does nothing.
+    pub respect_gitignore: bool,
 }
 
 impl SearchConfig {
@@ -111,6 +115,7 @@ impl SearchConfig {
             include_hidden: false,
             include_binary: false,
             follow_links: false,
+            respect_gitignore: false,
         }
     }
 }

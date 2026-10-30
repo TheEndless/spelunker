@@ -19,4 +19,4 @@ pub use model::{
     ConfigError, FileResult, Hit, PreviewLine, SearchError, SearchEvent, SearchSummary,
 };
 pub use name_filter::validate_name_regex;
-pub use search::search;
+pub use search::{gitignore_reaches, search};
