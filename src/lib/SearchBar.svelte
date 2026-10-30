@@ -20,6 +20,7 @@
   interface Props {
     preferences: Preferences;
     savedSearches: SavedSearch[];
+    recentSearches: Criteria[];
     savedNotice: string | null;
     running: boolean;
     /** Stop was requested and is still being carried out. */
@@ -36,6 +37,7 @@
     onSaveSearch: (name: string) => void;
     onRecallSearch: (criteria: Criteria) => void;
     onDeleteSearch: (name: string) => void;
+    onClearRecentSearches: () => void;
     onExport: (format: ExportFormat) => void;
     onOpenSettings: () => void;
   }
@@ -43,6 +45,7 @@
   let {
     preferences,
     savedSearches,
+    recentSearches,
     savedNotice,
     running,
     stopping,
@@ -56,6 +59,7 @@
     onSaveSearch,
     onRecallSearch,
     onDeleteSearch,
+    onClearRecentSearches,
     onExport,
     onOpenSettings,
   }: Props = $props();
@@ -300,8 +304,11 @@
         <div class="tools">
           <SavedSearchesMenu
             searches={savedSearches}
+            recent={recentSearches}
             notice={savedNotice}
             onRecall={(search) => onRecallSearch(search.criteria)}
+            onRecallRecent={onRecallSearch}
+            onClearRecent={onClearRecentSearches}
             onSave={onSaveSearch}
             onDelete={onDeleteSearch}
           />

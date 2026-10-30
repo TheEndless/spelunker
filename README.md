@@ -142,7 +142,7 @@ A second launch hands its folders to the window that is already open.
 
 **Can I use it as a disk usage map?** Yes. Search a drive with the name `*` and the results map draws a treemap of every file, sized by file size and colored by type or age.
 
-**Can I save a search or export the results?** Yes. Saved searches live in a menu on the search bar, and `Ctrl+E` exports the result list as CSV or plain text.
+**Can I save a search or export the results?** Yes. Saved searches live in a menu on the search bar, and the same menu lists your last 20 searches under **Recent** (with a **Clear** link), so a search you ran an hour ago is one click away. `Ctrl+E` exports the result list as CSV or plain text.
 
 **Does it send anything over the network?** Only the update check, which asks GitHub for the newest release number. See [Security notes](#security-notes).
 

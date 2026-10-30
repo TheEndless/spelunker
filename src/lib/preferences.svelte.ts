@@ -3,6 +3,7 @@ import { normalizeMapHeight, normalizePreviewWidth } from './paneSplit';
 import { DEFAULT_CRITERIA, normalizeCriteria, type Criteria } from './criteria';
 import { DEFAULT_EDITOR, normalizeEditor, type EditorSettings } from './editors';
 import { parseRoots } from './request';
+import { parseRecentSearches, rememberSearch } from './searchHistory';
 import { TOKEN_NAMES, PALETTES, accentTextFor, placeholderColorFor, tokensFor } from './palettes';
 import { resolveTheme } from './theme';
 import type { Shading } from './treemapPaint';
@@ -15,6 +16,8 @@ interface Stored {
   criteria: Criteria;
   contextLines: number;
   recentFolders: string[];
+  /** The searches run lately, newest first, to run again from the Saved menu. */
+  recentSearches: Criteria[];
   theme: ThemePreference;
   /** Id of the color theme, see palettes.ts. */
   palette: string;
@@ -46,6 +49,7 @@ function defaultStored(): Stored {
     criteria: normalizeCriteria(DEFAULT_CRITERIA),
     contextLines: 2,
     recentFolders: [],
+    recentSearches: [],
     theme: 'system',
     palette: PALETTES[0].id,
     filtersOpen: false,
@@ -76,6 +80,7 @@ function load(): Stored {
       recentFolders: Array.isArray(raw.recentFolders)
         ? raw.recentFolders.filter((folder: unknown) => typeof folder === 'string')
         : defaults.recentFolders,
+      recentSearches: parseRecentSearches(raw.recentSearches),
       theme: THEMES.includes(raw.theme) ? raw.theme : defaults.theme,
       palette: PALETTES.some((palette) => palette.id === raw.palette) ? raw.palette : defaults.palette,
       filtersOpen: raw.filtersOpen === true,
@@ -103,6 +108,7 @@ export class Preferences {
   criteria = $state<Criteria>(normalizeCriteria(DEFAULT_CRITERIA));
   contextLines = $state(2);
   recentFolders = $state<string[]>([]);
+  recentSearches = $state<Criteria[]>([]);
   theme = $state<ThemePreference>('system');
   palette = $state(PALETTES[0].id);
   filtersOpen = $state(false);
@@ -145,6 +151,15 @@ export class Preferences {
     this.recentFolders = merged.slice(0, MAX_RECENT_FOLDERS);
   }
 
+  /** Puts the search that is set up first among the recent ones. */
+  rememberSearch() {
+    this.recentSearches = rememberSearch($state.snapshot(this.recentSearches), $state.snapshot(this.criteria));
+  }
+
+  clearRecentSearches() {
+    this.recentSearches = [];
+  }
+
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Saves shortly after the last change, for values that change many times a second (a drag, a color picker). */
@@ -166,6 +181,7 @@ export class Preferences {
       criteria: $state.snapshot(this.criteria),
       contextLines: this.contextLines,
       recentFolders: $state.snapshot(this.recentFolders),
+      recentSearches: $state.snapshot(this.recentSearches),
       theme: this.theme,
       palette: this.palette,
       filtersOpen: this.filtersOpen,
