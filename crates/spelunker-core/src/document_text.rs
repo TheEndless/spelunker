@@ -5,6 +5,8 @@
 //!
 //! The text is meant to be searched and shown, not to reproduce the document. Formatting, fields,
 //! deleted revisions and text boxes in drawings are not followed.
+//!
+//! A PDF is read by `pdf_text` and comes out the same way, as lines of text.
 
 use crate::cancel::CancelToken;
 use quick_xml::events::{BytesRef, BytesStart, Event};
@@ -28,6 +30,7 @@ enum Kind {
     Sheet,
     Slides,
     OpenDocument,
+    Pdf,
 }
 
 fn kind_of(path: &Path) -> Option<Kind> {
@@ -37,11 +40,12 @@ fn kind_of(path: &Path) -> Option<Kind> {
         "xlsx" | "xlsm" | "xltx" | "xltm" => Some(Kind::Sheet),
         "pptx" | "pptm" | "potx" | "potm" | "ppsx" | "ppsm" => Some(Kind::Slides),
         "odt" | "ods" | "odp" | "ott" | "ots" | "otp" => Some(Kind::OpenDocument),
+        "pdf" => Some(Kind::Pdf),
         _ => None,
     }
 }
 
-/// Whether the file's extension is one of an Office or OpenDocument format whose text can be read.
+/// Whether the file's extension is one of an Office, OpenDocument or PDF format whose text can be read.
 pub fn is_document(path: &Path) -> bool {
     kind_of(path).is_some()
 }
@@ -76,6 +80,9 @@ struct Limits {
 fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io::Result<String> {
     let kind =
         kind_of(path).ok_or_else(|| io::Error::other("not an Office or OpenDocument file"))?;
+    if kind == Kind::Pdf {
+        return crate::pdf_text::extract(path, cancel, limits.text_bytes);
+    }
     let mut archive =
         ZipArchive::new(BufReader::new(std::fs::File::open(path)?)).map_err(zip_problem)?;
     let names: Vec<String> = archive
@@ -110,14 +117,14 @@ fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io:
 
 /// The lines of a document in one string, so the text is held once. Once a line would pass the
 /// limit nothing more is added, and `into_text` reports it.
-struct Lines {
+pub(crate) struct Lines {
     text: String,
     limit: usize,
     overflowed: bool,
 }
 
 impl Lines {
-    fn new(limit: usize) -> Self {
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
             text: String::new(),
             limit,
@@ -125,7 +132,7 @@ impl Lines {
         }
     }
 
-    fn push(&mut self, line: &str) {
+    pub(crate) fn push(&mut self, line: &str) {
         if self.overflowed {
             return;
         }
@@ -144,7 +151,7 @@ impl Lines {
         }
     }
 
-    fn into_text(self) -> io::Result<String> {
+    pub(crate) fn into_text(self) -> io::Result<String> {
         if self.overflowed {
             return Err(too_much_text(self.limit as u64));
         }
@@ -242,7 +249,7 @@ fn text_parts(kind: Kind, names: &[String]) -> Vec<String> {
             .filter(|name| *name == "content.xml")
             .cloned()
             .collect(),
-        Kind::Sheet => Vec::new(),
+        Kind::Sheet | Kind::Pdf => Vec::new(),
     }
 }
 
@@ -594,19 +601,11 @@ mod tests {
     #[test]
     fn only_office_and_opendocument_extensions_are_documents() {
         for name in [
-            "a.docx", "A.XLSX", "b.pptx", "c.odt", "d.ods", "e.odp", "f.docm", "g.potx",
+            "a.docx", "A.XLSX", "b.pptx", "c.odt", "d.ods", "e.odp", "f.docm", "g.potx", "h.PDF",
         ] {
             assert!(is_document(Path::new(name)), "{name}");
         }
-        for name in [
-            "a.doc",
-            "b.xls",
-            "c.pdf",
-            "d.zip",
-            "docx",
-            ".docx.bak",
-            "e.txt",
-        ] {
+        for name in ["a.doc", "b.xls", "d.zip", "docx", ".docx.bak", "e.txt"] {
             assert!(!is_document(Path::new(name)), "{name}");
         }
     }

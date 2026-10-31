@@ -10,6 +10,7 @@ mod file_text;
 mod gate;
 mod model;
 mod name_filter;
+mod pdf_text;
 mod search;
 
 pub use cancel::CancelToken;

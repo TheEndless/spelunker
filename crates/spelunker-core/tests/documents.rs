@@ -1,6 +1,6 @@
 mod common;
 
-use common::{run, write, write_zip};
+use common::{run, write, write_pdf, write_zip};
 use spelunker_core::{preview_file, read_file_text, ContentQuery, SearchConfig};
 use std::path::Path;
 
@@ -370,4 +370,60 @@ fn the_preview_of_a_document_does_not_depend_on_the_search_option() {
     let path = docx(root.path(), "report.docx", &paragraph(&["the invoice"]));
     let lines = preview_file(&path, &ContentQuery::literal("invoice"), 0, false).unwrap();
     assert_eq!(lines.len(), 1);
+}
+
+#[test]
+fn text_in_a_pdf_is_found_with_its_line() {
+    let root = tempfile::tempdir().unwrap();
+    write_pdf(
+        root.path(),
+        "invoice.pdf",
+        &["Invoice 1042", "Payment is due in thirty days", "Thank you"],
+    );
+    let outcome = run(&with_documents(root.path(), "thirty days"));
+    assert_eq!(outcome.names(), vec!["invoice.pdf"]);
+    let hit = &outcome.file("invoice.pdf").hits[0];
+    assert_eq!(hit.line, "Payment is due in thirty days");
+    assert_eq!(hit.line_number, 2);
+}
+
+#[test]
+fn a_pdf_is_only_searched_when_documents_are_searched() {
+    let root = tempfile::tempdir().unwrap();
+    write_pdf(root.path(), "invoice.pdf", &["Payment is due"]);
+    let mut config = with_documents(root.path(), "payment");
+    config.search_documents = false;
+    assert!(run(&config).names().is_empty());
+}
+
+#[test]
+fn a_file_named_pdf_that_is_not_one_is_reported_and_the_search_goes_on() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "broken.pdf", b"this is not a pdf");
+    write(root.path(), "plain.txt", b"needle");
+    let outcome = run(&with_documents(root.path(), "needle"));
+    assert_eq!(outcome.names(), vec!["plain.txt"]);
+    assert_eq!(outcome.errors.len(), 1);
+    assert!(outcome.errors[0].path.ends_with("broken.pdf"));
+    assert!(
+        outcome.errors[0].message.contains("PDF"),
+        "{}",
+        outcome.errors[0].message
+    );
+}
+
+#[test]
+fn the_preview_of_a_pdf_shows_its_text() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write_pdf(
+        root.path(),
+        "invoice.pdf",
+        &["First line", "Second needle line"],
+    );
+    let query = ContentQuery::literal("needle");
+    let text = read_file_text(&path, Some(&query), 1_000_000).unwrap();
+    assert!(text
+        .lines
+        .iter()
+        .any(|line| line.is_match && line.text == "Second needle line"));
 }
