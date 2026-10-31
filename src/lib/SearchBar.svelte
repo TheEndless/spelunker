@@ -184,8 +184,11 @@
             <label class="option" title="Also search inside binary files, not only text"
               ><input type="checkbox" bind:checked={criteria.includeBinary} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Binary files</label
             >
-            <label class="option" title="Also search the text inside Word, Excel and PowerPoint files and their OpenDocument equivalents (docx, xlsx, pptx, odt, ods, odp)"
+            <label class="option" title="Also search the text inside Word, Excel, PowerPoint and PDF files and their OpenDocument equivalents (docx, xlsx, pptx, odt, ods, odp, pdf)"
               ><input type="checkbox" bind:checked={criteria.searchDocuments} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Documents</label
+            >
+            <label class="option" title="Also search the text files inside zip, tar and gzip archives (zip, jar, tar, tgz, gz and more). Nothing is extracted to disk."
+              ><input type="checkbox" bind:checked={criteria.searchArchives} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Archives</label
             >
           </div>
         </div>

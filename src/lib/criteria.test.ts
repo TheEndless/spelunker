@@ -4,12 +4,14 @@ import { DEFAULT_CRITERIA, countActiveFilters, normalizeCriteria } from './crite
 describe('normalizeCriteria', () => {
   it('gives criteria saved before the newer options existed their defaults', () => {
     const loaded = normalizeCriteria({ text: 'alpha', lookIn: 'C:/x' });
-    expect(loaded).toMatchObject({ text: 'alpha', searchDocuments: false, respectGitignore: false });
+    expect(loaded).toMatchObject({ text: 'alpha', searchDocuments: false, searchArchives: false, respectGitignore: false });
   });
 
   it('keeps the options that were saved, and ignores ones of the wrong type', () => {
     expect(normalizeCriteria({ searchDocuments: true, respectGitignore: true })).toMatchObject({ searchDocuments: true, respectGitignore: true });
     expect(normalizeCriteria({ searchDocuments: 'yes' }).searchDocuments).toBe(false);
+    expect(normalizeCriteria({ searchArchives: true }).searchArchives).toBe(true);
+    expect(normalizeCriteria({ searchArchives: 1 }).searchArchives).toBe(false);
   });
 });
 

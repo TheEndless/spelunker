@@ -22,6 +22,7 @@ describe('buildSearchRequest', () => {
         includeHidden: true,
         includeBinary: true,
         searchDocuments: true,
+        searchArchives: true,
         followLinks: true,
         respectGitignore: true,
       }),
@@ -38,6 +39,7 @@ describe('buildSearchRequest', () => {
       includeHidden: true,
       includeBinary: true,
       searchDocuments: true,
+      searchArchives: true,
       followLinks: true,
       respectGitignore: true,
     });

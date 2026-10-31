@@ -57,8 +57,8 @@
   const kind = $derived(file ? previewKind(file.name) : 'other');
   const hasContentQuery = $derived(query !== null && query.text !== '');
   const isText = $derived(file !== null && kind === 'text');
-  /** Text is shown for it: a file read as text, or the words taken out of an Office or OpenDocument file. */
-  const showsText = $derived(isText || (file !== null && kind === 'office'));
+  /** Text is shown for it: a file read as text, or the words taken out of a document or an archive. */
+  const showsText = $derived(isText || (file !== null && kind === 'extracted'));
   const cappedLines = $derived(mode === 'matches' && lines.length > MAX_MATCH_VIEW_LINES ? lines.slice(0, MAX_MATCH_VIEW_LINES) : lines);
   const shownLines = $derived<PreviewLine[]>(mode === 'file' ? (fileText?.lines ?? []) : cappedLines);
   const hitLineNumbers = $derived(shownLines.filter((line) => line.isMatch).map((line) => line.lineNumber));

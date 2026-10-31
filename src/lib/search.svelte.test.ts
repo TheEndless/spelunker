@@ -31,6 +31,7 @@ const request = {
   includeHidden: false,
   includeBinary: false,
   searchDocuments: false,
+  searchArchives: false,
   followLinks: false,
   respectGitignore: false,
   minSize: null,

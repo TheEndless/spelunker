@@ -43,20 +43,23 @@ describe('previewKind', () => {
   });
 
   it('describes known binary formats instead of trying to read them', () => {
-    for (const name of ['a.zip', 'b.exe', 'c.dll', 'g.7z', 'h.iso', 'old.doc', 'old.xls', 'old.ppt']) {
+    for (const name of ['b.exe', 'c.dll', 'g.7z', 'h.iso', 'old.doc', 'old.xls', 'old.ppt', 'x.rar']) {
       expect(previewKind(name), name).toBe('other');
     }
   });
 
-  it('shows the text of Office and OpenDocument files, which the engine can read', () => {
+  it('shows the text of Office and OpenDocument files and of archives, which the engine can read', () => {
     for (const name of ['d.docx', 'e.XLSX', 'f.pptx', 'g.odt', 'h.ods', 'i.odp', 'j.docm', 'k.potx']) {
-      expect(previewKind(name), name).toBe('office');
+      expect(previewKind(name), name).toBe('extracted');
+    }
+    for (const name of ['a.zip', 'b.JAR', 'c.tar', 'd.tgz', 'e.log.gz', 'archive.tar.gz', 'f.epub']) {
+      expect(previewKind(name), name).toBe('extracted');
     }
   });
 
   it('is not fooled by a dot in a folder-like name or a leading dot', () => {
     expect(previewKind('.gitignore')).toBe('text');
-    expect(previewKind('archive.tar.gz')).toBe('other');
+    expect(previewKind('archive.tar.gz.bak')).toBe('text');
   });
 });
 

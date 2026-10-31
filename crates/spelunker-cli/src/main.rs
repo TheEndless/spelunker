@@ -70,9 +70,13 @@ struct Args {
     #[arg(long)]
     binary: bool,
 
-    /// Search the text inside Office and OpenDocument files (docx, xlsx, pptx, odt, ods, odp)
+    /// Search the text inside Office, OpenDocument and PDF files (docx, xlsx, pptx, odt, ods, odp, pdf)
     #[arg(long)]
     documents: bool,
+
+    /// Search the text files inside archives (zip, jar, tar, tgz, gz and more)
+    #[arg(long)]
+    archives: bool,
 
     /// Follow junctions and symlinked folders (loops are detected)
     #[arg(long)]
@@ -131,6 +135,7 @@ fn main() -> ExitCode {
     config.include_hidden = args.hidden;
     config.include_binary = args.binary;
     config.search_documents = args.documents;
+    config.search_archives = args.archives;
     config.follow_links = args.follow_links;
     config.respect_gitignore = args.respect_gitignore;
 
