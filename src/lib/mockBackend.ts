@@ -9,6 +9,8 @@ declare global {
     __spMockMissingPaths?: string[];
     /** A test seam: what the update check finds. A string makes the check fail with that sentence. */
     __spMockUpdate?: UpdateInfo | string;
+    /** A test seam: how long reading lines of a file takes, in milliseconds, so scripts can watch the loading state. */
+    __spMockReadDelayMs?: number;
   }
 }
 
@@ -279,7 +281,9 @@ export function saveSavedSearches(json: string) {
   }
 }
 
-export function readLines(_path: string, query: QueryOptions | null, firstLine: number, count: number): FileText {
+export async function readLines(_path: string, query: QueryOptions | null, firstLine: number, count: number): Promise<FileText> {
+  const delayMs = typeof window === 'undefined' ? 0 : (window.__spMockReadDelayMs ?? 0);
+  if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
   const wantedCount = Math.min(count, MOCK_MAX_LINES);
   if (query && isDemoQuery(query.text)) {
     const later = demoPreview(Number.MAX_SAFE_INTEGER).filter((line) => line.lineNumber >= firstLine);

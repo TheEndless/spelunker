@@ -66,6 +66,8 @@
   let fillError = $state<string | null>(null);
   let loading = $state(false);
   let loadingMore = $state(false);
+  /** The first line being loaded, so the gap it is in can say so. */
+  let loadingFromLine = $state<number | null>(null);
   /** Scrolling to the end of what is loaded found nothing more to load, so it stops trying. */
   let scrollLoadStalled = $state(false);
   let activeHit = $state(-1);
@@ -165,6 +167,7 @@
     fillError = null;
     loading = false;
     loadingMore = false;
+    loadingFromLine = null;
     scrollLoadStalled = false;
     loadedCharacters = 0;
     lengthOfFile = Promise.resolve(null);
@@ -222,6 +225,7 @@
     const searched = activeQuery;
     let received = 0;
     loadingMore = true;
+    loadingFromLine = first;
     try {
       let next = first;
       while (next <= last && loadedCharacters < MAX_LOADED_CHARACTERS) {
@@ -237,7 +241,10 @@
     } catch (error) {
       if (mine === generation) fillError = String(error);
     } finally {
-      if (mine === generation) loadingMore = false;
+      if (mine === generation) {
+        loadingMore = false;
+        loadingFromLine = null;
+      }
     }
     return received;
   }
@@ -541,16 +548,28 @@
             {#each visibleRows as row (row.kind === 'line' ? row.line.lineNumber : `gap-${row.from}`)}
               {#if row.kind === 'gap'}
                 {@const size = row.to - row.from + 1}
-                <div class="gapbar" style:height="{LINE_HEIGHT}px" style:width="{viewportWidth}px" role="group" aria-label={gapLabel(row)}>
+                {@const busy = loadingFromLine !== null && loadingFromLine >= row.from && loadingFromLine <= row.to}
+                <div
+                  class="gapbar"
+                  class:busy
+                  style:height="{LINE_HEIGHT}px"
+                  style:width="{viewportWidth}px"
+                  role="group"
+                  aria-label={gapLabel(row)}
+                  aria-busy={busy}
+                >
                   <span class="number" aria-hidden="true">&middot;&middot;&middot;</span>
-                  <span class="gaplabel">{gapLabel(row)}</span>
-                  {#if isSmallGap(row)}
-                    <button type="button" disabled={loadingMore} onclick={() => expand(row, 'all')}>Show {size === 1 ? 'it' : 'all'}</button>
-                  {:else}
-                    <button type="button" disabled={loadingMore} onclick={() => expand(row, 'below')}>Show next {EXPAND_LINES}</button>
-                    <button type="button" disabled={loadingMore} onclick={() => expand(row, 'above')}>Show previous {EXPAND_LINES}</button>
-                    {#if size <= SHOW_ALL_LINES}
-                      <button type="button" disabled={loadingMore} onclick={() => expand(row, 'all')}>Show all</button>
+                  <span class="gaplabel" role={busy ? 'status' : undefined}>{busy ? 'Loading lines...' : gapLabel(row)}</span>
+                  <!-- The bar says it is loading in place of its buttons, so the words have the room in a narrow pane. -->
+                  {#if !busy}
+                    {#if isSmallGap(row)}
+                      <button type="button" disabled={loadingMore} onclick={() => expand(row, 'all')}>Show {size === 1 ? 'it' : 'all'}</button>
+                    {:else}
+                      <button type="button" disabled={loadingMore} onclick={() => expand(row, 'below')}>Show next {EXPAND_LINES}</button>
+                      <button type="button" disabled={loadingMore} onclick={() => expand(row, 'above')}>Show previous {EXPAND_LINES}</button>
+                      {#if size <= SHOW_ALL_LINES}
+                        <button type="button" disabled={loadingMore} onclick={() => expand(row, 'all')}>Show all</button>
+                      {/if}
                     {/if}
                   {/if}
                 </div>
@@ -784,10 +803,15 @@
     color: var(--text-muted);
     user-select: none;
   }
+  /* Kept at the right edge of the visible list, since the line it labels runs far past it. */
   .clipped {
     flex: none;
     align-self: center;
+    position: sticky;
+    right: 0;
+    margin-left: auto;
     padding: 0 6px;
+    background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-muted);
@@ -814,6 +838,27 @@
     font-size: var(--text-small);
     white-space: nowrap;
     user-select: none;
+  }
+  /* A light band sweeps along the bar while its lines load, which can take seconds in a huge file. */
+  .gapbar.busy {
+    background-image: linear-gradient(90deg, transparent, var(--row-selected), transparent);
+    background-repeat: no-repeat;
+    background-size: 40% 100%;
+    animation: gap-loading 1.2s linear infinite;
+  }
+  @keyframes gap-loading {
+    from {
+      background-position: -40% 0;
+    }
+    to {
+      background-position: 140% 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .gapbar.busy {
+      animation: none;
+      background-position: 50% 0;
+    }
   }
   .gaplabel {
     flex: 1;
