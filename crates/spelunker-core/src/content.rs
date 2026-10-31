@@ -1,7 +1,8 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
 use crate::document_text::{extract_text, has_readable_text};
-use crate::line_clip::clip_line;
+use crate::file_text::FileText;
+use crate::line_clip::{clip_line, preview_line};
 use crate::model::{ConfigError, Hit, PreviewLine};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
@@ -100,43 +101,44 @@ impl ContentMatcher {
         })
     }
 
-    /// Every matching line plus `context_lines` of surrounding lines. Empty for binary files
-    /// unless binary search is enabled. The text of an Office or OpenDocument file is shown as
-    /// text whatever the binary and document settings, since it is read on request and not walked past.
-    pub fn preview_file(&self, path: &Path, context_lines: usize) -> io::Result<Vec<PreviewLine>> {
+    /// The matching lines plus `context_lines` of surrounding lines, stopping at the first match
+    /// that would take the preview past `max_lines` lines (`truncated` is then set). No lines for a
+    /// binary file unless binary search is enabled. The text of an Office or OpenDocument file is
+    /// shown as text whatever the binary and document settings, since it is read on request and
+    /// not walked past.
+    pub fn preview_matches(
+        &self,
+        path: &Path,
+        context_lines: usize,
+        max_lines: usize,
+    ) -> io::Result<FileText> {
+        let mut collector = PreviewCollector {
+            matcher: &self.matcher,
+            context_lines,
+            max_lines,
+            lines: Vec::new(),
+            truncated: false,
+            binary_seen: false,
+        };
         if has_readable_text(path) {
             let text = extract_text(path, &CancelToken::new())?;
-            let mut collector = PreviewCollector {
-                matcher: &self.matcher,
-                lines: Vec::new(),
-                binary_seen: false,
-            };
             self.searcher(context_lines, None, BinaryDetection::none())
                 .search_slice(&self.matcher, text.as_bytes(), &mut collector)
                 .map_err(io::Error::other)?;
-            return Ok(collector.lines);
-        }
-        let (mut searcher, file) = self.open(path, context_lines)?;
-        let mut collector = PreviewCollector {
-            matcher: &self.matcher,
-            lines: Vec::new(),
-            binary_seen: false,
-        };
-        searcher
-            .search_reader(&self.matcher, file, &mut collector)
-            .map_err(io::Error::other)?;
-        Ok(if collector.binary_seen {
-            Vec::new()
         } else {
-            collector.lines
-        })
+            let (mut searcher, file) = self.open(path, context_lines)?;
+            searcher
+                .search_reader(&self.matcher, file, &mut collector)
+                .map_err(io::Error::other)?;
+        }
+        Ok(collector.into_file_text())
     }
 
     pub(crate) fn regex(&self) -> &RegexMatcher {
         &self.matcher
     }
 
-    fn open(&self, path: &Path, context_lines: usize) -> io::Result<(Searcher, File)> {
+    pub(crate) fn open(&self, path: &Path, context_lines: usize) -> io::Result<(Searcher, File)> {
         let mut file = File::open(path)?;
         if self.multi_line && file.metadata()?.len() > MULTI_LINE_MAX_BYTES {
             return Err(io::Error::other(format!(
@@ -199,15 +201,26 @@ fn describe_pattern_error(error: &grep_regex::Error) -> String {
 }
 
 /// Convenience wrapper for one-off previews.
+pub fn preview_matches(
+    path: &Path,
+    query: &ContentQuery,
+    context_lines: usize,
+    include_binary: bool,
+    max_lines: usize,
+) -> io::Result<FileText> {
+    ContentMatcher::new(query, include_binary)
+        .map_err(io::Error::other)?
+        .preview_matches(path, context_lines, max_lines)
+}
+
+/// Every matching line with its context, however many there are.
 pub fn preview_file(
     path: &Path,
     query: &ContentQuery,
     context_lines: usize,
     include_binary: bool,
 ) -> io::Result<Vec<PreviewLine>> {
-    ContentMatcher::new(query, include_binary)
-        .map_err(io::Error::other)?
-        .preview_file(path, context_lines)
+    preview_matches(path, query, context_lines, include_binary, usize::MAX).map(|file| file.lines)
 }
 
 /// Picks an explicit decoder when the file has no BOM but is clearly not plain UTF-8.
@@ -306,22 +319,50 @@ impl Sink for HitCollector<'_> {
 
 struct PreviewCollector<'a> {
     matcher: &'a RegexMatcher,
+    context_lines: usize,
+    max_lines: usize,
     lines: Vec<PreviewLine>,
+    /// A match was left out because the preview had reached `max_lines`.
+    truncated: bool,
     binary_seen: bool,
+}
+
+impl PreviewCollector<'_> {
+    fn into_file_text(mut self) -> FileText {
+        if self.binary_seen {
+            return FileText {
+                binary: true,
+                ..FileText::default()
+            };
+        }
+        if self.truncated {
+            // Context before the match that was left out belongs to it, so it goes too.
+            let last_match = self.lines.iter().rev().find(|line| line.is_match);
+            let keep_through =
+                last_match.map_or(0, |line| line.line_number) + self.context_lines as u64;
+            self.lines.retain(|line| line.line_number <= keep_through);
+        }
+        FileText {
+            lines: self.lines,
+            truncated: self.truncated,
+            binary: false,
+        }
+    }
 }
 
 impl Sink for PreviewCollector<'_> {
     type Error = io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, found: &SinkMatch<'_>) -> Result<bool, io::Error> {
-        let clipped = clip_line(found.bytes(), Some(self.matcher))?;
-        self.lines.push(PreviewLine {
-            line_number: found.line_number().unwrap_or(0),
-            text: clipped.text,
-            is_match: true,
-            match_ranges: clipped.match_ranges,
-            clip: clipped.clip,
-        });
+        if self.lines.len() >= self.max_lines {
+            self.truncated = true;
+            return Ok(false);
+        }
+        let line_number = found.line_number().unwrap_or(0);
+        let mut line = preview_line(line_number, found.bytes(), Some(self.matcher))?;
+        // The searcher says this line matches even when no range of it could be found.
+        line.is_match = true;
+        self.lines.push(line);
         Ok(true)
     }
 
@@ -330,14 +371,9 @@ impl Sink for PreviewCollector<'_> {
         _searcher: &Searcher,
         context: &SinkContext<'_>,
     ) -> Result<bool, io::Error> {
-        let clipped = clip_line(context.bytes(), None)?;
-        self.lines.push(PreviewLine {
-            line_number: context.line_number().unwrap_or(0),
-            text: clipped.text,
-            is_match: false,
-            match_ranges: Vec::new(),
-            clip: clipped.clip,
-        });
+        let line_number = context.line_number().unwrap_or(0);
+        self.lines
+            .push(preview_line(line_number, context.bytes(), None)?);
         Ok(true)
     }
 

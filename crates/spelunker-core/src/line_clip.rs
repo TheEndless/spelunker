@@ -2,7 +2,7 @@
 //! many megabytes, and without a limit that line would be copied into every result and preview row
 //! and sent to the window.
 
-use crate::model::Clip;
+use crate::model::{Clip, PreviewLine};
 use grep_matcher::Matcher;
 use grep_regex::RegexMatcher;
 use grep_searcher::SinkError;
@@ -50,6 +50,22 @@ pub(crate) fn clip_line(raw: &[u8], matcher: Option<&RegexMatcher>) -> io::Resul
         text,
         match_ranges,
         clip,
+    })
+}
+
+/// One line for display, with the matches of `highlight` in it marked.
+pub(crate) fn preview_line(
+    line_number: u64,
+    raw: &[u8],
+    highlight: Option<&RegexMatcher>,
+) -> io::Result<PreviewLine> {
+    let clipped = clip_line(raw, highlight)?;
+    Ok(PreviewLine {
+        line_number,
+        text: clipped.text,
+        is_match: !clipped.match_ranges.is_empty(),
+        match_ranges: clipped.match_ranges,
+        clip: clipped.clip,
     })
 }
 
