@@ -10,6 +10,7 @@ mod content;
 mod document_text;
 mod file_text;
 mod gate;
+mod line_clip;
 mod model;
 mod name_filter;
 mod pdf_text;
@@ -20,7 +21,7 @@ pub use config::{ContentQuery, SearchConfig, SizeRange, TimeRange, DEFAULT_EXCLU
 pub use content::{preview_file, validate_content_query};
 pub use file_text::{read_file_text, FileText};
 pub use model::{
-    ConfigError, FileResult, Hit, PreviewLine, SearchError, SearchEvent, SearchSummary,
+    Clip, ConfigError, FileResult, Hit, PreviewLine, SearchError, SearchEvent, SearchSummary,
 };
 pub use name_filter::validate_name_regex;
 pub use search::{gitignore_reaches, search};

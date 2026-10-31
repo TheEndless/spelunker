@@ -233,6 +233,16 @@ pub struct PreviewLineDto {
     pub is_match: bool,
     /// Offsets in UTF-16 code units, so JavaScript can slice `text` directly.
     pub match_ranges: Vec<Utf16Range>,
+    /// What was cut off a line too long to keep whole. Absent for a line shown whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipDto>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipDto {
+    pub before_bytes: u64,
+    pub after_bytes: u64,
 }
 
 impl From<PreviewLine> for PreviewLineDto {
@@ -247,6 +257,10 @@ impl From<PreviewLine> for PreviewLineDto {
             text: line.text,
             is_match: line.is_match,
             match_ranges,
+            clip: line.clip.map(|clip| ClipDto {
+                before_bytes: clip.before_bytes,
+                after_bytes: clip.after_bytes,
+            }),
         }
     }
 }
@@ -290,10 +304,31 @@ mod tests {
             text: "é\u{1F600}needle".to_string(),
             is_match: true,
             match_ranges: std::iter::once(6..12).collect(),
+            clip: None,
         };
         let dto = PreviewLineDto::from(line);
         assert_eq!(dto.match_ranges, vec![Utf16Range { start: 3, end: 9 }]);
         assert_eq!(dto.line_number, 7);
+    }
+
+    #[test]
+    fn a_clipped_line_reports_what_was_cut_and_a_whole_line_says_nothing() {
+        let line = |clip| PreviewLine {
+            line_number: 1,
+            text: "needle".to_string(),
+            is_match: true,
+            match_ranges: std::iter::once(0..6).collect(),
+            clip,
+        };
+        let clipped = PreviewLineDto::from(line(Some(spelunker_core::Clip {
+            before_bytes: 10,
+            after_bytes: 20,
+        })));
+        let json = serde_json::to_value(&clipped).unwrap();
+        assert_eq!(json["clip"]["beforeBytes"], 10);
+        assert_eq!(json["clip"]["afterBytes"], 20);
+        let whole = serde_json::to_value(PreviewLineDto::from(line(None))).unwrap();
+        assert!(whole.get("clip").is_none());
     }
 
     /// A request with these roots, searching subfolders without a depth limit.

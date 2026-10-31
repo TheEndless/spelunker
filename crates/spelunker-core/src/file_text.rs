@@ -2,6 +2,7 @@ use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
 use crate::content::{detect_encoding, ContentMatcher};
 use crate::document_text::{extract_text, has_readable_text};
+use crate::line_clip::clip_line;
 use crate::model::PreviewLine;
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use std::fs::File;
@@ -28,7 +29,7 @@ pub fn read_file_text(
     if has_readable_text(path) {
         let text = extract_text(path, &CancelToken::new())?;
         let (shown, truncated) = first_lines(&text, max_bytes);
-        return Ok(build(shown, query, truncated));
+        return build(shown, query, truncated);
     }
     let mut bytes = Vec::new();
     // One byte past the limit tells a file of exactly the limit from a longer one.
@@ -60,10 +61,10 @@ pub fn read_file_text(
             Some(_) => &*decoded,
             None => decoded.strip_suffix('\u{FFFD}').unwrap_or(&decoded),
         };
-        return Ok(build(text, query, true));
+        return build(text, query, true);
     }
     let (decoded, _) = encoding.decode_without_bom_handling(body);
-    Ok(build(&decoded, query, false))
+    build(&decoded, query, false)
 }
 
 /// The start of `text` that fits in `max_bytes`, cut after a whole line when it has to be cut.
@@ -97,7 +98,7 @@ fn end_of_last_line(body: &[u8], encoding: &'static Encoding) -> Option<usize> {
     }
 }
 
-fn build(text: &str, query: Option<&ContentQuery>, truncated: bool) -> FileText {
+fn build(text: &str, query: Option<&ContentQuery>, truncated: bool) -> io::Result<FileText> {
     let matcher = query
         .filter(|query| !query.text.is_empty())
         .and_then(|query| ContentMatcher::new(query, true).ok());
@@ -105,21 +106,19 @@ fn build(text: &str, query: Option<&ContentQuery>, truncated: bool) -> FileText 
         .lines()
         .enumerate()
         .map(|(index, line)| {
-            let match_ranges = matcher
-                .as_ref()
-                .map(|matcher| matcher.ranges_in(line))
-                .unwrap_or_default();
-            PreviewLine {
+            let clipped = clip_line(line.as_bytes(), matcher.as_ref().map(ContentMatcher::regex))?;
+            Ok(PreviewLine {
                 line_number: index as u64 + 1,
-                text: line.to_string(),
-                is_match: !match_ranges.is_empty(),
-                match_ranges,
-            }
+                text: clipped.text,
+                is_match: !clipped.match_ranges.is_empty(),
+                match_ranges: clipped.match_ranges,
+                clip: clipped.clip,
+            })
         })
-        .collect();
-    FileText {
+        .collect::<io::Result<_>>()?;
+    Ok(FileText {
         lines,
         truncated,
         binary: false,
-    }
+    })
 }

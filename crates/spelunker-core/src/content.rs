@@ -1,17 +1,16 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
 use crate::document_text::{extract_text, has_readable_text};
+use crate::line_clip::clip_line;
 use crate::model::{ConfigError, Hit, PreviewLine};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
-use grep_matcher::Matcher;
 use grep_regex::{RegexMatcher, RegexMatcherBuilder};
 use grep_searcher::{
     BinaryDetection, Encoding as SearcherEncoding, Searcher, SearcherBuilder, Sink, SinkContext,
-    SinkError, SinkMatch,
+    SinkMatch,
 };
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::ops::Range;
 use std::path::Path;
 
 /// How many leading bytes are inspected to guess a file's encoding.
@@ -133,9 +132,8 @@ impl ContentMatcher {
         })
     }
 
-    /// Byte ranges of every match inside one line of text.
-    pub(crate) fn ranges_in(&self, line: &str) -> Vec<Range<usize>> {
-        find_ranges(&self.matcher, line).unwrap_or_default()
+    pub(crate) fn regex(&self) -> &RegexMatcher {
+        &self.matcher
     }
 
     fn open(&self, path: &Path, context_lines: usize) -> io::Result<(Searcher, File)> {
@@ -290,13 +288,12 @@ impl Sink for HitCollector<'_> {
         if self.cancel.is_cancelled() {
             return Ok(false);
         }
-        let line = decode_line(found.bytes());
-        let match_ranges = find_ranges(self.matcher, &line)?;
-
+        let clipped = clip_line(found.bytes(), Some(self.matcher))?;
         self.hits.push(Hit {
             line_number: found.line_number().unwrap_or(0),
-            line,
-            match_ranges,
+            line: clipped.text,
+            match_ranges: clipped.match_ranges,
+            clip: clipped.clip,
         });
         Ok(true)
     }
@@ -305,24 +302,6 @@ impl Sink for HitCollector<'_> {
         self.binary_seen = true;
         Ok(false)
     }
-}
-
-fn decode_line(raw: &[u8]) -> String {
-    let trimmed = raw.strip_suffix(b"\n").unwrap_or(raw);
-    let trimmed = trimmed.strip_suffix(b"\r").unwrap_or(trimmed);
-    String::from_utf8_lossy(trimmed).into_owned()
-}
-
-/// Ranges come from the final string so they stay valid byte offsets into it.
-fn find_ranges(matcher: &RegexMatcher, line: &str) -> io::Result<Vec<Range<usize>>> {
-    let mut ranges = Vec::new();
-    matcher
-        .find_iter(line.as_bytes(), |found_match| {
-            ranges.push(found_match.start()..found_match.end());
-            true
-        })
-        .map_err(io::Error::error_message)?;
-    Ok(ranges)
 }
 
 struct PreviewCollector<'a> {
@@ -335,13 +314,13 @@ impl Sink for PreviewCollector<'_> {
     type Error = io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, found: &SinkMatch<'_>) -> Result<bool, io::Error> {
-        let text = decode_line(found.bytes());
-        let match_ranges = find_ranges(self.matcher, &text)?;
+        let clipped = clip_line(found.bytes(), Some(self.matcher))?;
         self.lines.push(PreviewLine {
             line_number: found.line_number().unwrap_or(0),
-            text,
+            text: clipped.text,
             is_match: true,
-            match_ranges,
+            match_ranges: clipped.match_ranges,
+            clip: clipped.clip,
         });
         Ok(true)
     }
@@ -351,11 +330,13 @@ impl Sink for PreviewCollector<'_> {
         _searcher: &Searcher,
         context: &SinkContext<'_>,
     ) -> Result<bool, io::Error> {
+        let clipped = clip_line(context.bytes(), None)?;
         self.lines.push(PreviewLine {
             line_number: context.line_number().unwrap_or(0),
-            text: decode_line(context.bytes()),
+            text: clipped.text,
             is_match: false,
             match_ranges: Vec::new(),
+            clip: clipped.clip,
         });
         Ok(true)
     }
