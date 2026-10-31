@@ -9,7 +9,7 @@
 use crate::cancel::CancelToken;
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::Reader;
-use std::io::{self, BufReader, Read, Seek};
+use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use zip::result::ZipError;
 use zip::ZipArchive;
@@ -17,6 +17,10 @@ use zip::ZipArchive;
 /// How much XML one document may expand to in total. Real documents are far below it. A file that
 /// goes past it is a zip bomb or something no one wants searched, and is reported instead.
 const MAX_XML_BYTES: u64 = 128 * 1024 * 1024;
+
+/// How much text one document may hold. The text is kept whole in memory while it is searched, and
+/// several documents are read at once, so this is far lower than what the XML may expand to.
+const MAX_TEXT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
@@ -44,10 +48,32 @@ pub fn is_document(path: &Path) -> bool {
 
 /// The text of a document, one line per paragraph or row, joined by line feeds.
 pub fn extract_text(path: &Path, cancel: &CancelToken) -> io::Result<String> {
-    extract_with_limit(path, cancel, MAX_XML_BYTES)
+    let limits = Limits {
+        xml_bytes: MAX_XML_BYTES,
+        text_bytes: MAX_TEXT_BYTES,
+    };
+    extract_with_limits(path, cancel, limits)
 }
 
-fn extract_with_limit(path: &Path, cancel: &CancelToken, limit: u64) -> io::Result<String> {
+#[cfg(test)]
+fn extract_with_limit(path: &Path, cancel: &CancelToken, xml_bytes: u64) -> io::Result<String> {
+    let limits = Limits {
+        xml_bytes,
+        text_bytes: MAX_TEXT_BYTES,
+    };
+    extract_with_limits(path, cancel, limits)
+}
+
+/// What one document may grow to while it is read.
+#[derive(Clone, Copy)]
+struct Limits {
+    /// Bytes of XML read from all parts together.
+    xml_bytes: u64,
+    /// Bytes of text kept.
+    text_bytes: usize,
+}
+
+fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io::Result<String> {
     let kind =
         kind_of(path).ok_or_else(|| io::Error::other("not an Office or OpenDocument file"))?;
     let mut archive =
@@ -56,32 +82,81 @@ fn extract_with_limit(path: &Path, cancel: &CancelToken, limit: u64) -> io::Resu
         .file_names()
         .filter_map(|name| name.ok().map(|name| name.into_owned()))
         .collect();
-    let mut budget = limit;
-    let mut lines = Vec::new();
+    let mut budget = limits.xml_bytes;
+    let mut lines = Lines::new(limits.text_bytes);
 
     if kind == Kind::Sheet {
         let shared = match names
             .iter()
             .find(|name| name.as_str() == "xl/sharedStrings.xml")
         {
-            Some(name) => shared_strings(&read_part(&mut archive, name, &mut budget, cancel)?)?,
+            Some(name) => {
+                shared_strings(open_part(&mut archive, name, &mut budget, cancel, limits)?)?
+            }
             None => Vec::new(),
         };
         for name in parts_in_order(&names, "xl/worksheets/sheet") {
-            sheet_rows(
-                &read_part(&mut archive, &name, &mut budget, cancel)?,
-                &shared,
-                &mut lines,
-            )?;
+            let part = open_part(&mut archive, &name, &mut budget, cancel, limits)?;
+            sheet_rows(part, &shared, &mut lines)?;
         }
     } else {
         for name in text_parts(kind, &names) {
-            let part = read_part(&mut archive, &name, &mut budget, cancel)?;
-            paragraph_lines(&part, dialect_of(kind), &mut lines)?;
+            let part = open_part(&mut archive, &name, &mut budget, cancel, limits)?;
+            paragraph_lines(part, dialect_of(kind), &mut lines)?;
         }
     }
-    // A NUL would make the searcher call the text binary, and it is never part of a word.
-    Ok(lines.join("\n").replace('\0', " "))
+    lines.into_text()
+}
+
+/// The lines of a document in one string, so the text is held once. Once a line would pass the
+/// limit nothing more is added, and `into_text` reports it.
+struct Lines {
+    text: String,
+    limit: usize,
+    overflowed: bool,
+}
+
+impl Lines {
+    fn new(limit: usize) -> Self {
+        Self {
+            text: String::new(),
+            limit,
+            overflowed: false,
+        }
+    }
+
+    fn push(&mut self, line: &str) {
+        if self.overflowed {
+            return;
+        }
+        if self.text.len() + line.len() + 1 > self.limit {
+            self.overflowed = true;
+            return;
+        }
+        if !self.text.is_empty() {
+            self.text.push('\n');
+        }
+        // A NUL would make the searcher call the text binary, and it is never part of a word.
+        if line.contains('\0') {
+            self.text.push_str(&line.replace('\0', " "));
+        } else {
+            self.text.push_str(line);
+        }
+    }
+
+    fn into_text(self) -> io::Result<String> {
+        if self.overflowed {
+            return Err(too_much_text(self.limit as u64));
+        }
+        Ok(self.text)
+    }
+}
+
+fn too_much_text(limit_bytes: u64) -> io::Error {
+    io::Error::other(format!(
+        "the document holds more than {} MB of text, which is more than is searched",
+        limit_bytes / (1024 * 1024)
+    ))
 }
 
 /// Why a zip could not be read, in words that help: a password protected Office file is not a zip.
@@ -95,28 +170,48 @@ fn zip_problem(error: ZipError) -> io::Error {
     }
 }
 
-/// Reads one part whole, counting it against what the document is allowed to expand to.
-fn read_part<R: Read + Seek>(
-    archive: &mut ZipArchive<R>,
+/// Counts what is read from a part against what the document is allowed to expand to, and stops
+/// reading when the search is cancelled.
+struct Budgeted<'a, R> {
+    inner: R,
+    remaining: &'a mut u64,
+    cancel: &'a CancelToken,
+    limit: u64,
+}
+
+impl<R: Read> Read for Budgeted<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.cancel.is_cancelled() {
+            return Err(io::Error::other("search cancelled"));
+        }
+        let count = self.inner.read(buffer)?;
+        if count as u64 > *self.remaining {
+            *self.remaining = 0;
+            return Err(too_much_text(self.limit));
+        }
+        *self.remaining -= count as u64;
+        Ok(count)
+    }
+}
+
+/// One part of the archive as a stream, so the XML is parsed as it is inflated and never held whole.
+fn open_part<'a, R: Read + Seek>(
+    archive: &'a mut ZipArchive<R>,
     name: &str,
-    budget: &mut u64,
-    cancel: &CancelToken,
-) -> io::Result<Vec<u8>> {
+    budget: &'a mut u64,
+    cancel: &'a CancelToken,
+    limits: Limits,
+) -> io::Result<impl BufRead + 'a> {
     if cancel.is_cancelled() {
         return Err(io::Error::other("search cancelled"));
     }
     let part = archive.by_name(name).map_err(zip_problem)?;
-    let mut bytes = Vec::new();
-    // One byte past the budget tells a part that fits exactly from one that does not.
-    part.take(*budget + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > *budget {
-        return Err(io::Error::other(format!(
-            "the document holds more than {} MB of text, which is more than is searched",
-            MAX_XML_BYTES / (1024 * 1024)
-        )));
-    }
-    *budget -= bytes.len() as u64;
-    Ok(bytes)
+    Ok(BufReader::new(Budgeted {
+        inner: part,
+        remaining: budget,
+        cancel,
+        limit: limits.xml_bytes,
+    }))
 }
 
 /// The parts of a word, slide or OpenDocument file that hold text, in reading order.
@@ -215,6 +310,10 @@ fn is_one_of(name: &str, names: &[&str]) -> bool {
 }
 
 fn malformed(error: quick_xml::Error) -> io::Error {
+    // A read that was stopped (cancelled, or past a limit) comes back as an I/O error with its own words.
+    if let quick_xml::Error::Io(error) = &error {
+        return io::Error::other(error.to_string());
+    }
     io::Error::other(format!("the document holds malformed text: {error}"))
 }
 
@@ -246,9 +345,9 @@ fn space_count(element: &BytesStart<'_>) -> usize {
 }
 
 /// Collects the lines of a part of a word, slide or OpenDocument file.
-struct LineBuilder {
+struct LineBuilder<'a> {
     dialect: &'static Dialect,
-    lines: Vec<String>,
+    lines: &'a mut Lines,
     paragraph: String,
     text_depth: usize,
     cell_depth: usize,
@@ -256,11 +355,11 @@ struct LineBuilder {
     row: Vec<String>,
 }
 
-impl LineBuilder {
-    fn new(dialect: &'static Dialect) -> Self {
+impl<'a> LineBuilder<'a> {
+    fn new(dialect: &'static Dialect, lines: &'a mut Lines) -> Self {
         Self {
             dialect,
-            lines: Vec::new(),
+            lines,
             paragraph: String::new(),
             text_depth: 0,
             cell_depth: 0,
@@ -308,7 +407,7 @@ impl LineBuilder {
         }
         if is_one_of(name, self.dialect.rows) {
             if !self.row.is_empty() {
-                self.lines.push(self.row.join("\t"));
+                self.lines.push(&self.row.join("\t"));
             }
             self.row.clear();
         }
@@ -326,18 +425,18 @@ impl LineBuilder {
             }
             self.cell.push_str(text);
         } else {
-            self.lines.push(text.to_string());
+            self.lines.push(text);
         }
     }
 }
 
 /// Appends the lines of one XML part of a word, slide or OpenDocument file to `lines`.
 fn paragraph_lines(
-    xml: &[u8],
+    xml: impl BufRead,
     dialect: &'static Dialect,
-    lines: &mut Vec<String>,
+    lines: &mut Lines,
 ) -> io::Result<()> {
-    let mut builder = LineBuilder::new(dialect);
+    let mut builder = LineBuilder::new(dialect, lines);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     loop {
@@ -360,13 +459,12 @@ fn paragraph_lines(
         buffer.clear();
     }
     builder.end_paragraph();
-    lines.append(&mut builder.lines);
     Ok(())
 }
 
 /// The strings of a spreadsheet's shared string table, which cells refer to by number. Phonetic
 /// guides (`rPh`) are not part of the text of a string.
-fn shared_strings(xml: &[u8]) -> io::Result<Vec<String>> {
+fn shared_strings(xml: impl BufRead) -> io::Result<Vec<String>> {
     let mut strings = Vec::new();
     let mut current = String::new();
     let (mut in_string, mut in_phonetic, mut in_text) = (false, false, false);
@@ -408,7 +506,7 @@ fn shared_strings(xml: &[u8]) -> io::Result<Vec<String>> {
 
 /// Appends one line per non-empty row of a worksheet to `lines`, the cells separated by tabs.
 /// A cell shows its string, or its number as stored. Booleans and errors are left out.
-fn sheet_rows(xml: &[u8], shared: &[String], lines: &mut Vec<String>) -> io::Result<()> {
+fn sheet_rows(xml: impl BufRead, shared: &[String], lines: &mut Lines) -> io::Result<()> {
     let mut cells: Vec<String> = Vec::new();
     let mut kind = String::new();
     let (mut value, mut inline) = (String::new(), String::new());
@@ -455,7 +553,7 @@ fn sheet_rows(xml: &[u8], shared: &[String], lines: &mut Vec<String>) -> io::Res
                 }
                 "row" => {
                     if !cells.is_empty() {
-                        lines.push(cells.join("\t"));
+                        lines.push(&cells.join("\t"));
                     }
                     cells.clear();
                 }
@@ -566,6 +664,27 @@ mod tests {
         );
         assert!(extract_with_limit(&path, &CancelToken::new(), 1000).is_err());
         assert!(extract_with_limit(&path, &CancelToken::new(), 2000).is_ok());
+    }
+
+    #[test]
+    fn text_past_the_text_limit_is_refused_and_a_smaller_text_is_not() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("long.docx");
+        let paragraphs = "<w:p><w:t>twenty characters!!</w:t></w:p>".repeat(50);
+        let part = format!("<w:document xmlns:w=\"w\">{paragraphs}</w:document>");
+        archive_with(&path, &[("word/document.xml", part.as_bytes())]);
+        let tight = Limits {
+            xml_bytes: MAX_XML_BYTES,
+            text_bytes: 500,
+        };
+        let refused = extract_with_limits(&path, &CancelToken::new(), tight).unwrap_err();
+        assert!(refused.to_string().contains("more than"), "{refused}");
+        let roomy = Limits {
+            xml_bytes: MAX_XML_BYTES,
+            text_bytes: 5000,
+        };
+        let text = extract_with_limits(&path, &CancelToken::new(), roomy).unwrap();
+        assert_eq!(text.lines().count(), 50);
     }
 
     #[test]
