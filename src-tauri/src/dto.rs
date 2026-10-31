@@ -422,7 +422,10 @@ mod tests {
                 .unwrap()
                 .into_config()
         };
-        assert!(!request("").respect_gitignore, "an older request has no such field");
+        assert!(
+            !request("").respect_gitignore,
+            "an older request has no such field"
+        );
         assert!(request(r#", "respectGitignore": true"#).respect_gitignore);
     }
 
@@ -439,7 +442,10 @@ mod tests {
                 .unwrap()
                 .into_config()
         };
-        assert!(!request("").search_documents, "an older request has no such field");
+        assert!(
+            !request("").search_documents,
+            "an older request has no such field"
+        );
         assert!(request(r#", "searchDocuments": true"#).search_documents);
     }
 

@@ -27,7 +27,13 @@ fn ignore_files_are_not_applied_unless_asked_for() {
     let root = tempfile::tempdir().unwrap();
     repository(root.path());
     let names = run(&config(root.path())).names();
-    for found in ["debug.log", "keep.log", "output.txt", "trace.log", "main.rs"] {
+    for found in [
+        "debug.log",
+        "keep.log",
+        "output.txt",
+        "trace.log",
+        "main.rs",
+    ] {
         assert!(names.contains(&found.to_string()), "{found} in {names:?}");
     }
 }

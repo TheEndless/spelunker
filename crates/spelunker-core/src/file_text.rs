@@ -1,5 +1,5 @@
-use crate::config::ContentQuery;
 use crate::cancel::CancelToken;
+use crate::config::ContentQuery;
 use crate::content::{detect_encoding, ContentMatcher};
 use crate::document_text::{extract_text, is_document};
 use crate::model::PreviewLine;

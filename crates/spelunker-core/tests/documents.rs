@@ -10,7 +10,9 @@ const SLIDE_NS: &str = r#"xmlns:a="http://schemas.openxmlformats.org/drawingml/2
 const ODF_NS: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0""#;
 
 fn word(body: &str) -> String {
-    format!(r#"<?xml version="1.0" encoding="UTF-8"?><w:document {WORD_NS}><w:body>{body}</w:body></w:document>"#)
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><w:document {WORD_NS}><w:body>{body}</w:body></w:document>"#
+    )
 }
 
 fn paragraph(runs: &[&str]) -> String {
@@ -38,7 +40,8 @@ fn text_in_a_word_document_is_found_with_its_paragraph() {
     docx(
         root.path(),
         "report.docx",
-        &(paragraph(&["Quarterly summary"]) + &paragraph(&["Payment of the ", "invoice", " is late"])),
+        &(paragraph(&["Quarterly summary"])
+            + &paragraph(&["Payment of the ", "invoice", " is late"])),
     );
     let outcome = run(&with_documents(root.path(), "invoice"));
     assert_eq!(outcome.names(), vec!["report.docx"]);
@@ -51,8 +54,15 @@ fn text_in_a_word_document_is_found_with_its_paragraph() {
 #[test]
 fn a_word_split_across_runs_is_one_word() {
     let root = tempfile::tempdir().unwrap();
-    docx(root.path(), "split.docx", &paragraph(&["Hel", "lo wor", "ld"]));
-    assert_eq!(run(&with_documents(root.path(), "hello world")).names(), vec!["split.docx"]);
+    docx(
+        root.path(),
+        "split.docx",
+        &paragraph(&["Hel", "lo wor", "ld"]),
+    );
+    assert_eq!(
+        run(&with_documents(root.path(), "hello world")).names(),
+        vec!["split.docx"]
+    );
 }
 
 #[test]
@@ -60,7 +70,10 @@ fn the_markup_around_the_text_is_not_searched() {
     let root = tempfile::tempdir().unwrap();
     docx(root.path(), "plain.docx", &paragraph(&["nothing to see"]));
     for markup in ["document", "w:body", "preserve", "wordprocessingml"] {
-        assert!(run(&with_documents(root.path(), markup)).names().is_empty(), "{markup}");
+        assert!(
+            run(&with_documents(root.path(), markup)).names().is_empty(),
+            "{markup}"
+        );
     }
 }
 
@@ -95,10 +108,19 @@ fn headers_footers_and_footnotes_are_searched_too() {
         ],
     );
     for found in ["HEADERWORD", "FOOTERWORD", "NOTEWORD"] {
-        assert_eq!(run(&with_documents(root.path(), found)).names(), vec!["parts.docx"], "{found}");
+        assert_eq!(
+            run(&with_documents(root.path(), found)).names(),
+            vec!["parts.docx"],
+            "{found}"
+        );
     }
     for missing in ["NOTIMAGEWORD", "STYLEWORD"] {
-        assert!(run(&with_documents(root.path(), missing)).names().is_empty(), "{missing}");
+        assert!(
+            run(&with_documents(root.path(), missing))
+                .names()
+                .is_empty(),
+            "{missing}"
+        );
     }
 }
 
@@ -119,16 +141,30 @@ fn a_spreadsheet_row_is_a_line_with_its_cells_separated_by_tabs() {
     write_zip(
         root.path(),
         "book.xlsx",
-        &[("xl/sharedStrings.xml", &shared), ("xl/worksheets/sheet1.xml", &sheet)],
+        &[
+            ("xl/sharedStrings.xml", &shared),
+            ("xl/worksheets/sheet1.xml", &sheet),
+        ],
     );
     let acme = run(&with_documents(root.path(), "acme corp"));
     assert_eq!(acme.file("book.xlsx").hits[0].line, "Acme Corp\t1250.5");
     assert_eq!(acme.file("book.xlsx").hits[0].line_number, 2);
-    assert_eq!(run(&with_documents(root.path(), "typed in place")).names(), vec!["book.xlsx"]);
-    assert_eq!(run(&with_documents(root.path(), "formula text")).names(), vec!["book.xlsx"]);
-    assert_eq!(run(&with_documents(root.path(), "1250.5")).names(), vec!["book.xlsx"]);
+    assert_eq!(
+        run(&with_documents(root.path(), "typed in place")).names(),
+        vec!["book.xlsx"]
+    );
+    assert_eq!(
+        run(&with_documents(root.path(), "formula text")).names(),
+        vec!["book.xlsx"]
+    );
+    assert_eq!(
+        run(&with_documents(root.path(), "1250.5")).names(),
+        vec!["book.xlsx"]
+    );
     assert!(
-        run(&with_documents(root.path(), "PHONETIC")).names().is_empty(),
+        run(&with_documents(root.path(), "PHONETIC"))
+            .names()
+            .is_empty(),
         "phonetic guides are not the text of the cell"
     );
 }
@@ -136,7 +172,9 @@ fn a_spreadsheet_row_is_a_line_with_its_cells_separated_by_tabs() {
 #[test]
 fn slides_are_read_in_order_with_their_notes() {
     let root = tempfile::tempdir().unwrap();
-    let slide = |text: &str| format!(r#"<p:sld {SLIDE_NS}><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:sld>"#);
+    let slide = |text: &str| {
+        format!(r#"<p:sld {SLIDE_NS}><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:sld>"#)
+    };
     write_zip(
         root.path(),
         "deck.pptx",
@@ -148,9 +186,17 @@ fn slides_are_read_in_order_with_their_notes() {
         ],
     );
     let outcome = run(&with_documents(root.path(), "slide"));
-    let lines: Vec<&str> = outcome.file("deck.pptx").hits.iter().map(|hit| hit.line.as_str()).collect();
+    let lines: Vec<&str> = outcome
+        .file("deck.pptx")
+        .hits
+        .iter()
+        .map(|hit| hit.line.as_str())
+        .collect();
     assert_eq!(lines, vec!["first slide", "second slide", "tenth slide"]);
-    assert_eq!(run(&with_documents(root.path(), "speaker notes")).names(), vec!["deck.pptx"]);
+    assert_eq!(
+        run(&with_documents(root.path(), "speaker notes")).names(),
+        vec!["deck.pptx"]
+    );
 }
 
 #[test]
@@ -202,7 +248,10 @@ fn documents_are_only_searched_when_asked_for() {
     config.search_documents = false;
     let outcome = run(&config);
     assert!(outcome.names().is_empty());
-    assert_eq!(outcome.summary.binary_skipped, 1, "skipped unopened, as a binary file is");
+    assert_eq!(
+        outcome.summary.binary_skipped, 1,
+        "skipped unopened, as a binary file is"
+    );
     config.search_documents = true;
     let outcome = run(&config);
     assert_eq!(outcome.names(), vec!["report.docx"]);
@@ -232,7 +281,9 @@ fn an_unreadable_document_is_reported_and_the_search_goes_on() {
     assert_eq!(outcome.errors.len(), 1);
     assert!(outcome.errors[0].path.ends_with("broken.docx"));
     assert!(
-        outcome.errors[0].message.contains("password protected or damaged"),
+        outcome.errors[0]
+            .message
+            .contains("password protected or damaged"),
         "{}",
         outcome.errors[0].message
     );
@@ -241,7 +292,11 @@ fn an_unreadable_document_is_reported_and_the_search_goes_on() {
 #[test]
 fn an_office_file_that_holds_no_text_part_is_a_file_without_matches() {
     let root = tempfile::tempdir().unwrap();
-    write_zip(root.path(), "empty.docx", &[("[Content_Types].xml", "<Types/>")]);
+    write_zip(
+        root.path(),
+        "empty.docx",
+        &[("[Content_Types].xml", "<Types/>")],
+    );
     let outcome = run(&with_documents(root.path(), "needle"));
     assert!(outcome.names().is_empty());
     assert!(outcome.errors.is_empty());
@@ -250,7 +305,11 @@ fn an_office_file_that_holds_no_text_part_is_a_file_without_matches() {
 #[test]
 fn the_other_search_options_apply_to_document_text() {
     let root = tempfile::tempdir().unwrap();
-    docx(root.path(), "mixed.docx", &(paragraph(&["Needle upper"]) + &paragraph(&["a needle lower"])));
+    docx(
+        root.path(),
+        "mixed.docx",
+        &(paragraph(&["Needle upper"]) + &paragraph(&["a needle lower"])),
+    );
     let mut config = with_documents(root.path(), "needle");
     config.content.as_mut().unwrap().match_case = true;
     let hits = &run(&config).file("mixed.docx").hits.len();
@@ -266,7 +325,9 @@ fn the_preview_shows_matches_with_context_from_the_document_text() {
     let path = docx(
         root.path(),
         "long.docx",
-        &(1..=9).map(|number| paragraph(&[&format!("paragraph {number}")])).collect::<String>(),
+        &(1..=9)
+            .map(|number| paragraph(&[&format!("paragraph {number}")]))
+            .collect::<String>(),
     );
     let lines = preview_file(&path, &ContentQuery::literal("paragraph 5"), 1, false).unwrap();
     let texts: Vec<&str> = lines.iter().map(|line| line.text.as_str()).collect();
@@ -277,7 +338,11 @@ fn the_preview_shows_matches_with_context_from_the_document_text() {
 #[test]
 fn the_whole_text_view_shows_document_text_not_a_binary_notice() {
     let root = tempfile::tempdir().unwrap();
-    let path = docx(root.path(), "view.docx", &(paragraph(&["first"]) + &paragraph(&["second needle"])));
+    let path = docx(
+        root.path(),
+        "view.docx",
+        &(paragraph(&["first"]) + &paragraph(&["second needle"])),
+    );
     let text = read_file_text(&path, Some(&ContentQuery::literal("needle")), 1024 * 1024).unwrap();
     assert!(!text.binary && !text.truncated);
     assert_eq!(text.lines.len(), 2);
@@ -288,7 +353,9 @@ fn the_whole_text_view_shows_document_text_not_a_binary_notice() {
 #[test]
 fn a_long_document_is_cut_at_a_whole_line_in_the_text_view() {
     let root = tempfile::tempdir().unwrap();
-    let body: String = (1..=500).map(|number| paragraph(&[&format!("paragraph number {number}")])).collect();
+    let body: String = (1..=500)
+        .map(|number| paragraph(&[&format!("paragraph number {number}")]))
+        .collect();
     let path = docx(root.path(), "long.docx", &body);
     let text = read_file_text(&path, None, 1000).unwrap();
     assert!(text.truncated);
