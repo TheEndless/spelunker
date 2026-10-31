@@ -85,10 +85,26 @@ impl Lines {
 /// Counts what is read against what the file is allowed to expand to, and stops reading when the
 /// search is cancelled.
 pub(crate) struct Budgeted<'a, R> {
-    pub(crate) inner: R,
-    pub(crate) remaining: &'a mut u64,
-    pub(crate) cancel: &'a CancelToken,
-    pub(crate) limit: u64,
+    inner: R,
+    remaining: &'a mut u64,
+    cancel: &'a CancelToken,
+    limit: u64,
+}
+
+impl<'a, R> Budgeted<'a, R> {
+    pub(crate) fn new(
+        inner: R,
+        remaining: &'a mut u64,
+        cancel: &'a CancelToken,
+        limit: u64,
+    ) -> Self {
+        Self {
+            inner,
+            remaining,
+            cancel,
+            limit,
+        }
+    }
 }
 
 impl<R: Read> Read for Budgeted<'_, R> {

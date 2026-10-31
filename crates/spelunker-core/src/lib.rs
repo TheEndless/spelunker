@@ -1,6 +1,7 @@
 //! Spelunker search core: parallel folder walk, name filtering, and streaming content search.
 //! No UI and no global state. Callers pass a config, a cancel token, and an event callback.
 
+mod archive_text;
 mod binary_extensions;
 mod bounded_text;
 mod cancel;

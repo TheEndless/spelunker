@@ -8,6 +8,7 @@
 //!
 //! A PDF is read by `pdf_text` and comes out the same way, as lines of text.
 
+use crate::archive_text::{self, is_archive};
 use crate::bounded_text::{Budgeted, Limits, Lines};
 use crate::cancel::CancelToken;
 use quick_xml::events::{BytesRef, BytesStart, Event};
@@ -43,8 +44,17 @@ pub fn is_document(path: &Path) -> bool {
     kind_of(path).is_some()
 }
 
-/// The text of a document, one line per paragraph or row, joined by line feeds.
+/// Whether the text of the file can be read out of it, as a document or as an archive. This is what
+/// the preview needs. A search reads documents and archives only when each is asked for.
+pub fn has_readable_text(path: &Path) -> bool {
+    is_document(path) || is_archive(path)
+}
+
+/// The text of a document or archive, one line per paragraph or row, joined by line feeds.
 pub fn extract_text(path: &Path, cancel: &CancelToken) -> io::Result<String> {
+    if is_archive(path) {
+        return archive_text::extract(path, cancel, Limits::STANDARD.text_bytes);
+    }
     extract_with_limits(path, cancel, Limits::STANDARD)
 }
 
@@ -118,12 +128,12 @@ fn open_part<'a, R: Read + Seek>(
         return Err(io::Error::other("search cancelled"));
     }
     let part = archive.by_name(name).map_err(zip_problem)?;
-    Ok(BufReader::new(Budgeted {
-        inner: part,
-        remaining: budget,
+    Ok(BufReader::new(Budgeted::new(
+        part,
+        budget,
         cancel,
-        limit: limits.read_bytes,
-    }))
+        limits.read_bytes,
+    )))
 }
 
 /// The parts of a word, slide or OpenDocument file that hold text, in reading order.

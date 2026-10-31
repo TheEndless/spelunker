@@ -1,6 +1,6 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
-use crate::document_text::{extract_text, is_document};
+use crate::document_text::{extract_text, has_readable_text};
 use crate::model::{ConfigError, Hit, PreviewLine};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
 use grep_matcher::Matcher;
@@ -79,7 +79,7 @@ impl ContentMatcher {
         }
     }
 
-    /// Searches the text of an Office or OpenDocument file instead of its bytes.
+    /// Searches the text of a document, PDF or archive instead of its bytes.
     pub fn search_document(&self, path: &Path, cancel: &CancelToken) -> io::Result<ContentOutcome> {
         let text = match extract_text(path, cancel) {
             Ok(text) => text,
@@ -103,9 +103,9 @@ impl ContentMatcher {
 
     /// Every matching line plus `context_lines` of surrounding lines. Empty for binary files
     /// unless binary search is enabled. The text of an Office or OpenDocument file is shown as
-    /// text whatever the binary setting, since it is read on request and not walked past.
+    /// text whatever the binary and document settings, since it is read on request and not walked past.
     pub fn preview_file(&self, path: &Path, context_lines: usize) -> io::Result<Vec<PreviewLine>> {
-        if is_document(path) {
+        if has_readable_text(path) {
             let text = extract_text(path, &CancelToken::new())?;
             let mut collector = PreviewCollector {
                 matcher: &self.matcher,

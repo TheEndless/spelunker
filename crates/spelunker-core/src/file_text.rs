@@ -1,7 +1,7 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
 use crate::content::{detect_encoding, ContentMatcher};
-use crate::document_text::{extract_text, is_document};
+use crate::document_text::{extract_text, has_readable_text};
 use crate::model::PreviewLine;
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use std::fs::File;
@@ -25,7 +25,7 @@ pub fn read_file_text(
     query: Option<&ContentQuery>,
     max_bytes: usize,
 ) -> io::Result<FileText> {
-    if is_document(path) {
+    if has_readable_text(path) {
         let text = extract_text(path, &CancelToken::new())?;
         let (shown, truncated) = first_lines(&text, max_bytes);
         return Ok(build(shown, query, truncated));

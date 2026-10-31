@@ -1,3 +1,4 @@
+use crate::archive_text::is_archive;
 use crate::binary_extensions::has_binary_extension;
 use crate::cancel::CancelToken;
 use crate::config::SearchConfig;
@@ -358,7 +359,9 @@ impl<F: Fn(SearchEvent)> Shared<F> {
         };
 
         if let Some(content_matcher) = &self.content_matcher {
-            let searched = if config.search_documents && is_document(entry.path()) {
+            let wanted_text = (config.search_documents && is_document(entry.path()))
+                || (config.search_archives && is_archive(entry.path()));
+            let searched = if wanted_text {
                 content_matcher.search_document(entry.path(), &self.cancel)
             } else {
                 // Skip known binary types without opening them. An open can block on antivirus for

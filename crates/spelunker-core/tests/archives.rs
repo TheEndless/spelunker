@@ -131,7 +131,7 @@ fn a_single_gzipped_file_is_searched_as_its_text() {
     let outcome = run(&with_archives(root.path(), "needle"));
     let hit = &outcome.file("app.log.gz").hits[0];
     assert_eq!(hit.line, "needle failure");
-    assert_eq!(hit.line_number, 2, "after the name line");
+    assert_eq!(hit.line_number, 3, "after the name line and the first line");
 }
 
 #[test]
