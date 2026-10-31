@@ -409,7 +409,8 @@
     if (!query || query.text === '') return;
     try {
       const found = await previewFile(row.path, query, 0, session.includeBinary);
-      await copy(found.filter((line) => line.isMatch).map((line) => line.text).join('\r\n'));
+      await copy(found.lines.filter((line) => line.isMatch).map((line) => line.text).join('\r\n'));
+      if (found.truncated) say('info', `Copied the first ${found.lines.length.toLocaleString('en-US')} matching lines. The file has more than can be listed here.`);
     } catch (error) {
       say('error', `Could not read the matching lines: ${error}`);
     }

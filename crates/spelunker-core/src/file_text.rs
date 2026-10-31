@@ -1,120 +1,39 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
-use crate::content::{detect_encoding, ContentMatcher};
+use crate::content::ContentMatcher;
 use crate::document_text::{extract_text, has_readable_text};
 use crate::line_clip::preview_line;
 use crate::model::PreviewLine;
-use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, UTF_8};
 use grep_regex::RegexMatcher;
 use grep_searcher::{Searcher, Sink, SinkMatch};
-use std::fs::File;
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
-/// A text file read for display, with the lines that match a query flagged.
+/// How much one preview call may return. Lines are cut to a window when they are very long, so
+/// a count of lines alone does not bound the size of the answer.
+#[derive(Clone, Copy, Debug)]
+pub struct PreviewBudget {
+    /// Most lines returned.
+    pub lines: usize,
+    /// Stop once the text returned reaches this many bytes. At least one line is always returned.
+    pub bytes: usize,
+}
+
+impl PreviewBudget {
+    pub const UNLIMITED: PreviewBudget = PreviewBudget {
+        lines: usize::MAX,
+        bytes: usize::MAX,
+    };
+}
+
+/// Lines of a text file read for display, with the lines that match a query flagged.
 #[derive(Clone, Debug, Default)]
 pub struct FileText {
     pub lines: Vec<PreviewLine>,
-    /// The file was longer than the limit, so only its first lines are here.
+    /// More lines follow the ones returned: the budget ran out before the file did.
     pub truncated: bool,
     /// The file is not text (it contains NUL bytes), so no lines are returned.
     pub binary: bool,
-}
-
-/// Reads up to `max_bytes` of a text file and splits it into numbered lines. When `query` has
-/// text, lines containing it are marked and carry their match ranges.
-pub fn read_file_text(
-    path: &Path,
-    query: Option<&ContentQuery>,
-    max_bytes: usize,
-) -> io::Result<FileText> {
-    if has_readable_text(path) {
-        let text = extract_text(path, &CancelToken::new())?;
-        let (shown, truncated) = first_lines(&text, max_bytes);
-        return build(shown, query, truncated);
-    }
-    let mut bytes = Vec::new();
-    // One byte past the limit tells a file of exactly the limit from a longer one.
-    File::open(path)?
-        .take(max_bytes as u64 + 1)
-        .read_to_end(&mut bytes)?;
-    let truncated = bytes.len() > max_bytes;
-    bytes.truncate(max_bytes);
-
-    let (encoding, body) = match Encoding::for_bom(&bytes) {
-        Some((bom_encoding, bom_length)) => (bom_encoding, &bytes[bom_length..]),
-        None => (detect_encoding(&bytes).unwrap_or(UTF_8), &bytes[..]),
-    };
-    let wide = encoding == UTF_16LE || encoding == UTF_16BE;
-    if !wide && body.contains(&0) {
-        return Ok(FileText {
-            binary: true,
-            ..FileText::default()
-        });
-    }
-    if truncated {
-        // Cut at the last complete line so the view never ends in half a line.
-        let whole_lines = end_of_last_line(body, encoding);
-        // A file with no line break at all (minified code) shows what fits instead of nothing.
-        let (decoded, _) =
-            encoding.decode_without_bom_handling(&body[..whole_lines.unwrap_or(body.len())]);
-        // Without a line break to cut at, the cut may have split a character in two.
-        let text = match whole_lines {
-            Some(_) => &*decoded,
-            None => decoded.strip_suffix('\u{FFFD}').unwrap_or(&decoded),
-        };
-        return build(text, query, true);
-    }
-    let (decoded, _) = encoding.decode_without_bom_handling(body);
-    build(&decoded, query, false)
-}
-
-/// The start of `text` that fits in `max_bytes`, cut after a whole line when it has to be cut.
-fn first_lines(text: &str, max_bytes: usize) -> (&str, bool) {
-    if text.len() <= max_bytes {
-        return (text, false);
-    }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    let whole_lines = text[..end].rfind('\n').map_or(end, |index| index + 1);
-    (&text[..whole_lines], true)
-}
-
-/// The byte offset just after the last line break, found on character boundaries. In UTF-16 a
-/// byte equal to a newline can be half of another character, so the search steps two bytes at a time.
-fn end_of_last_line(body: &[u8], encoding: &'static Encoding) -> Option<usize> {
-    if encoding == UTF_16LE {
-        body.chunks_exact(2)
-            .rposition(|unit| unit == [0x0A, 0x00])
-            .map(|index| (index + 1) * 2)
-    } else if encoding == UTF_16BE {
-        body.chunks_exact(2)
-            .rposition(|unit| unit == [0x00, 0x0A])
-            .map(|index| (index + 1) * 2)
-    } else {
-        body.iter()
-            .rposition(|&byte| byte == b'\n')
-            .map(|index| index + 1)
-    }
-}
-
-fn build(text: &str, query: Option<&ContentQuery>, truncated: bool) -> io::Result<FileText> {
-    let matcher = query
-        .filter(|query| !query.text.is_empty())
-        .and_then(|query| ContentMatcher::new(query, true).ok());
-    let highlight = matcher.as_ref().map(ContentMatcher::regex);
-    let lines = text
-        .lines()
-        .enumerate()
-        .map(|(index, line)| preview_line(index as u64 + 1, line.as_bytes(), highlight))
-        .collect::<io::Result<_>>()?;
-    Ok(FileText {
-        lines,
-        truncated,
-        binary: false,
-    })
 }
 
 /// A matcher that matches every line, so the searcher hands over each line in turn, decoded and
@@ -123,20 +42,22 @@ fn every_line() -> io::Result<ContentMatcher> {
     ContentMatcher::new(&ContentQuery::literal(""), false).map_err(io::Error::other)
 }
 
-/// Up to `count` lines starting at line `first_line` (the first line is 1), with the lines that
-/// match `query` marked. The lines before it are read past but not kept, so a range deep in a large
-/// file costs time and no memory. `truncated` says lines follow the ones returned.
+/// Lines starting at line `first_line` (the first line is 1) as far as `budget` allows, with the
+/// lines that match `query` marked. The lines before it are read past but not kept, so a range deep
+/// in a large file costs time and no memory. `truncated` says lines follow the ones returned.
 pub fn read_lines(
     path: &Path,
     query: Option<&ContentQuery>,
     first_line: u64,
-    count: usize,
+    budget: PreviewBudget,
 ) -> io::Result<FileText> {
     let first_line = first_line.max(1);
     let matcher = highlight_matcher(query);
     let mut window = LineWindow {
         first_line,
-        end: first_line.saturating_add(count as u64),
+        end: first_line.saturating_add(budget.lines as u64),
+        max_bytes: budget.bytes,
+        bytes: 0,
         highlight: matcher.as_ref().map(ContentMatcher::regex),
         lines: Vec::new(),
         more: false,
@@ -180,6 +101,9 @@ fn highlight_matcher(query: Option<&ContentQuery>) -> Option<ContentMatcher> {
 struct LineWindow<'a> {
     first_line: u64,
     end: u64,
+    max_bytes: usize,
+    /// Bytes of text in `lines`.
+    bytes: usize,
     highlight: Option<&'a RegexMatcher>,
     lines: Vec<PreviewLine>,
     /// A line at or past `end` exists.
@@ -193,12 +117,13 @@ impl LineWindow<'_> {
         if line_number < self.first_line {
             return Ok(true);
         }
-        if line_number >= self.end {
+        if line_number >= self.end || (self.bytes >= self.max_bytes && !self.lines.is_empty()) {
             self.more = true;
             return Ok(false);
         }
-        self.lines
-            .push(preview_line(line_number, raw, self.highlight)?);
+        let line = preview_line(line_number, raw, self.highlight)?;
+        self.bytes += line.text.len();
+        self.lines.push(line);
         Ok(true)
     }
 

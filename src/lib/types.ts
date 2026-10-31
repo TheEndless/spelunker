@@ -41,11 +41,20 @@ export interface MatchRange {
   end: number;
 }
 
+/** What was cut off a line too long to keep whole. The kept text and these two counts add up to the line. */
+export interface Clip {
+  beforeBytes: number;
+  afterBytes: number;
+}
+
 export interface PreviewLine {
   lineNumber: number;
+  /** A very long line is only a window of it, around the first match or at its start. */
   text: string;
   isMatch: boolean;
   matchRanges: MatchRange[];
+  /** Set when `text` is only part of the line. */
+  clip?: Clip;
 }
 
 export interface QueryOptions {
@@ -74,10 +83,10 @@ export interface UpdateInfo {
   published: string | null;
 }
 
-/** A whole text file for the preview, with lines that match the search flagged. */
+/** Lines of a text file for the preview, with the ones that match the search flagged. */
 export interface FileText {
   lines: PreviewLine[];
-  /** The file is longer than the preview reads, so only its first lines are shown. */
+  /** More lines (or matches) follow the ones returned: the preview's size limit was reached. */
   truncated: boolean;
   /** The file is not text. */
   binary: boolean;

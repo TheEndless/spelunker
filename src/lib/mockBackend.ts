@@ -108,6 +108,15 @@ const SKIPPED_FILES: ErrorRow[] = Array.from({ length: 46 }, (_, index) => ({
 /** True when the search text asks for the invented documents folder in demoFixture.ts. */
 const isDemoQuery = (text: string): boolean => text.trim().toLowerCase() === DEMO_QUERY;
 
+const SMALL_FILE_LINES = 60;
+/** Typing "huge" as the search text or the name pattern previews every result as a file of four million lines, to see how the preview copes. */
+const HUGE_QUERY = 'huge';
+const HUGE_FILE_LINES = 4_000_000;
+
+/** How long the pretend file every row previews as is, and where it matches, set by the search text. */
+let pretendLineCount = SMALL_FILE_LINES;
+let pretendMatchLines = [12, 13, 40];
+
 /**
  * Typing "many" in the text box streams 100,000 rows so scrolling can be judged by eye. "deep"
  * streams 100,000 rows in a deep, uneven folder tree, the fair test for the results map. "invoice"
@@ -115,6 +124,9 @@ const isDemoQuery = (text: string): boolean => text.trim().toLowerCase() === DEM
  */
 export function startSearch(request: SearchRequest, onMessage: (message: SearchMessage) => void) {
   cancelled = false;
+  const huge = [request.query.text, request.namePatterns].some((text) => text.trim().toLowerCase() === HUGE_QUERY);
+  pretendLineCount = huge ? HUGE_FILE_LINES : SMALL_FILE_LINES;
+  pretendMatchLines = huge ? [12, 13, 2_000_000, HUGE_FILE_LINES - 5] : [12, 13, 40];
   const demo = isDemoQuery(request.query.text) ? demoRows() : null;
   const total = demo ? demo.length : ['many', 'slow', 'deep'].includes(request.query.text) ? 100_000 : 400;
   const withHits = request.query.text !== '';
@@ -170,27 +182,29 @@ export function stopSearch() {
   cancelled = true;
 }
 
-export function previewFile(_path: string, query: QueryOptions, contextLines: number): PreviewLine[] {
-  if (isDemoQuery(query.text)) return demoPreview(contextLines);
-  const lines: PreviewLine[] = [];
-  const needle = query.text || 'needle';
-  const matchLines = [12, 13, 40];
-  for (const matchLine of matchLines) {
+/** Most lines one preview call returns, like the real backend's limit. */
+const MOCK_MAX_LINES = 5000;
+
+/** The line at `lineNumber` of the pretend file, a match when the file matches there. */
+function pretendLine(lineNumber: number, needle: string): PreviewLine {
+  const isMatch = needle !== '' && pretendMatchLines.includes(lineNumber);
+  const text = isMatch ? `    let result = find_${needle}(input); // caf\u00e9 ${needle}` : `    // line ${lineNumber} of a pretend file`;
+  const start = isMatch ? text.indexOf(needle) : -1;
+  return { lineNumber, text, isMatch, matchRanges: start >= 0 ? [{ start, end: start + needle.length }] : [] };
+}
+
+export function previewFile(_path: string, query: QueryOptions, contextLines: number): FileText {
+  if (isDemoQuery(query.text)) return { lines: demoPreview(contextLines), truncated: false, binary: false };
+  const wanted = new Set<number>();
+  for (const matchLine of pretendMatchLines) {
     for (let offset = -contextLines; offset <= contextLines; offset++) {
       const lineNumber = matchLine + offset;
-      if (lines.some((line) => line.lineNumber === lineNumber)) continue;
-      const isMatch = offset === 0 || matchLines.includes(lineNumber);
-      const text = isMatch ? `    let result = find_${needle}(input); // caf\u00e9 ${needle}` : `    // context line ${lineNumber}`;
-      const start = text.indexOf(needle);
-      lines.push({
-        lineNumber,
-        text,
-        isMatch,
-        matchRanges: isMatch && start >= 0 ? [{ start, end: start + needle.length }] : [],
-      });
+      if (lineNumber >= 1 && lineNumber <= pretendLineCount) wanted.add(lineNumber);
     }
   }
-  return lines.sort((left, right) => left.lineNumber - right.lineNumber);
+  const needle = query.text || 'needle';
+  const lines = [...wanted].sort((left, right) => left - right).map((lineNumber) => pretendLine(lineNumber, needle));
+  return { lines, truncated: false, binary: false };
 }
 
 // Browser-only approximations. The real app validates with the Rust regex engine.
@@ -265,15 +279,18 @@ export function saveSavedSearches(json: string) {
   }
 }
 
-export function readFileText(_path: string, query: QueryOptions | null): FileText {
-  if (query && isDemoQuery(query.text)) return { lines: demoPreview(Number.MAX_SAFE_INTEGER), truncated: false, binary: false };
-  const needle = query?.text || '';
-  const lines: PreviewLine[] = Array.from({ length: 60 }, (_, index) => {
-    const lineNumber = index + 1;
-    const isMatch = needle !== '' && lineNumber % 9 === 0;
-    const text = isMatch ? `    let result = find_${needle}(input);` : `    // line ${lineNumber} of a pretend file`;
-    const start = isMatch ? text.indexOf(needle) : -1;
-    return { lineNumber, text, isMatch, matchRanges: start >= 0 ? [{ start, end: start + needle.length }] : [] };
-  });
-  return { lines, truncated: false, binary: false };
+export function readLines(_path: string, query: QueryOptions | null, firstLine: number, count: number): FileText {
+  const wantedCount = Math.min(count, MOCK_MAX_LINES);
+  if (query && isDemoQuery(query.text)) {
+    const later = demoPreview(Number.MAX_SAFE_INTEGER).filter((line) => line.lineNumber >= firstLine);
+    return { lines: later.slice(0, wantedCount), truncated: later.length > wantedCount, binary: false };
+  }
+  const needle = query?.text ?? '';
+  const last = Math.min(pretendLineCount, firstLine + wantedCount - 1);
+  const lines = Array.from({ length: Math.max(0, last - firstLine + 1) }, (_, index) => pretendLine(firstLine + index, needle));
+  return { lines, truncated: last < pretendLineCount, binary: false };
+}
+
+export function countLines(_path: string): number {
+  return pretendLineCount;
 }

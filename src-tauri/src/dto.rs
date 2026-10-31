@@ -265,7 +265,7 @@ impl From<PreviewLine> for PreviewLineDto {
     }
 }
 
-/// A whole text file for the preview. See `spelunker_core::read_file_text`.
+/// Lines of a text file for the preview. See `spelunker_core::read_lines`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTextDto {

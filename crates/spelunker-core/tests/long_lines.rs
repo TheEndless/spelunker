@@ -1,7 +1,9 @@
 mod common;
 
 use common::{run, write};
-use spelunker_core::{preview_file, read_file_text, Clip, ContentQuery, PreviewLine, SearchConfig};
+use spelunker_core::{
+    preview_file, read_lines, Clip, ContentQuery, PreviewBudget, PreviewLine, SearchConfig,
+};
 use std::path::Path;
 
 /// More than any line keeps. Cutting at it must leave the match and the surroundings readable.
@@ -117,7 +119,7 @@ fn the_whole_file_view_clips_huge_lines_and_numbers_stay_true() {
     let root = tempfile::tempdir().unwrap();
     let path = write(root.path(), "min.json", &long_line(LONG, LONG));
     let query = ContentQuery::literal("NEEDLE");
-    let file = read_file_text(&path, Some(&query), 8 * 1024 * 1024).unwrap();
+    let file = read_lines(&path, Some(&query), 1, PreviewBudget::UNLIMITED).unwrap();
     assert_eq!(file.lines.len(), 2);
     let hit = &file.lines[0];
     assert_eq!((hit.line_number, hit.is_match), (1, true));

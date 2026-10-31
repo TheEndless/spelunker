@@ -37,10 +37,13 @@ const call = (command, args) =>
 const refused = (result) => result.ok === false && /not in the folders of the current search/.test(result.error);
 
 const query = { text: '', regex: false, matchCase: false, wholeWord: false, multiLine: false };
-const read = await call('read_file_text', { path: inside, query: null });
+const lines = { query: null, firstLine: 1, count: 10 };
+const read = await call('read_lines', { path: inside, ...lines });
 check('reading a file in the searched folder works', read.ok, read);
-check('reading a file outside it is refused', refused(await call('read_file_text', { path: outside, query: null })));
-check('a path that climbs out of the folder with .. is refused', refused(await call('read_file_text', { path: climbing, query: null })));
+check('reading a file outside it is refused', refused(await call('read_lines', { path: outside, ...lines })));
+check('a path that climbs out of the folder with .. is refused', refused(await call('read_lines', { path: climbing, ...lines })));
+check('counting the lines of a file in the searched folder works', (await call('count_lines', { path: inside })).ok);
+check('counting the lines of a file outside it is refused', refused(await call('count_lines', { path: outside })));
 check('a preview outside the folder is refused', refused(await call('preview', { path: outside, query, contextLines: 1, includeBinary: false })));
 check('allowing a file outside the folder for the asset protocol is refused', refused(await call('allow_preview', { path: outside })));
 check('opening a file outside the folder is refused', refused(await call('open_path', { path: outside })));

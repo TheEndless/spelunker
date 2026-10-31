@@ -43,3 +43,19 @@ describe('matchPosition', () => {
     expect(matchPosition(-1, 0)).toBe('No matches');
   });
 });
+
+describe('matchPosition when more matches follow the ones listed', () => {
+  it('marks the count as a lower bound', () => {
+    expect(matchPosition(-1, 400, true)).toBe('400+ matches');
+    expect(matchPosition(2, 400, true)).toBe('Match 3 of 400+');
+  });
+
+  it('says a single listed match is not the only one', () => {
+    expect(matchPosition(-1, 1, true)).toBe('1+ matches');
+  });
+
+  it('is unchanged when nothing follows', () => {
+    expect(matchPosition(2, 400, false)).toBe('Match 3 of 400');
+    expect(matchPosition(-1, 0, true)).toBe('No matches');
+  });
+});

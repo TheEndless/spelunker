@@ -1,7 +1,7 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
 use crate::document_text::{extract_text, has_readable_text};
-use crate::file_text::FileText;
+use crate::file_text::{FileText, PreviewBudget};
 use crate::line_clip::{clip_line, preview_line};
 use crate::model::{ConfigError, Hit, PreviewLine};
 use encoding_rs::{Encoding, UTF_16BE, UTF_16LE, WINDOWS_1252};
@@ -102,7 +102,7 @@ impl ContentMatcher {
     }
 
     /// The matching lines plus `context_lines` of surrounding lines, stopping at the first match
-    /// that would take the preview past `max_lines` lines (`truncated` is then set). No lines for a
+    /// that would take the preview past `budget` (`truncated` is then set). No lines for a
     /// binary file unless binary search is enabled. The text of an Office or OpenDocument file is
     /// shown as text whatever the binary and document settings, since it is read on request and
     /// not walked past.
@@ -110,12 +110,13 @@ impl ContentMatcher {
         &self,
         path: &Path,
         context_lines: usize,
-        max_lines: usize,
+        budget: PreviewBudget,
     ) -> io::Result<FileText> {
         let mut collector = PreviewCollector {
             matcher: &self.matcher,
             context_lines,
-            max_lines,
+            budget,
+            bytes: 0,
             lines: Vec::new(),
             truncated: false,
             binary_seen: false,
@@ -206,11 +207,11 @@ pub fn preview_matches(
     query: &ContentQuery,
     context_lines: usize,
     include_binary: bool,
-    max_lines: usize,
+    budget: PreviewBudget,
 ) -> io::Result<FileText> {
     ContentMatcher::new(query, include_binary)
         .map_err(io::Error::other)?
-        .preview_matches(path, context_lines, max_lines)
+        .preview_matches(path, context_lines, budget)
 }
 
 /// Every matching line with its context, however many there are.
@@ -220,7 +221,14 @@ pub fn preview_file(
     context_lines: usize,
     include_binary: bool,
 ) -> io::Result<Vec<PreviewLine>> {
-    preview_matches(path, query, context_lines, include_binary, usize::MAX).map(|file| file.lines)
+    preview_matches(
+        path,
+        query,
+        context_lines,
+        include_binary,
+        PreviewBudget::UNLIMITED,
+    )
+    .map(|file| file.lines)
 }
 
 /// Picks an explicit decoder when the file has no BOM but is clearly not plain UTF-8.
@@ -320,9 +328,11 @@ impl Sink for HitCollector<'_> {
 struct PreviewCollector<'a> {
     matcher: &'a RegexMatcher,
     context_lines: usize,
-    max_lines: usize,
+    budget: PreviewBudget,
+    /// Bytes of text in `lines`.
+    bytes: usize,
     lines: Vec<PreviewLine>,
-    /// A match was left out because the preview had reached `max_lines`.
+    /// A match was left out because the preview had reached its budget.
     truncated: bool,
     binary_seen: bool,
 }
@@ -354,7 +364,7 @@ impl Sink for PreviewCollector<'_> {
     type Error = io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, found: &SinkMatch<'_>) -> Result<bool, io::Error> {
-        if self.lines.len() >= self.max_lines {
+        if self.lines.len() >= self.budget.lines || self.bytes >= self.budget.bytes {
             self.truncated = true;
             return Ok(false);
         }
@@ -362,6 +372,7 @@ impl Sink for PreviewCollector<'_> {
         let mut line = preview_line(line_number, found.bytes(), Some(self.matcher))?;
         // The searcher says this line matches even when no range of it could be found.
         line.is_match = true;
+        self.bytes += line.text.len();
         self.lines.push(line);
         Ok(true)
     }
@@ -372,8 +383,9 @@ impl Sink for PreviewCollector<'_> {
         context: &SinkContext<'_>,
     ) -> Result<bool, io::Error> {
         let line_number = context.line_number().unwrap_or(0);
-        self.lines
-            .push(preview_line(line_number, context.bytes(), None)?);
+        let line = preview_line(line_number, context.bytes(), None)?;
+        self.bytes += line.text.len();
+        self.lines.push(line);
         Ok(true)
     }
 

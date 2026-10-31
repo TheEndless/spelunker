@@ -19,7 +19,7 @@ mod search;
 pub use cancel::CancelToken;
 pub use config::{ContentQuery, SearchConfig, SizeRange, TimeRange, DEFAULT_EXCLUDED_DIRS};
 pub use content::{preview_file, preview_matches, validate_content_query};
-pub use file_text::{count_lines, read_file_text, read_lines, FileText};
+pub use file_text::{count_lines, read_lines, FileText, PreviewBudget};
 pub use model::{
     Clip, ConfigError, FileResult, Hit, PreviewLine, SearchError, SearchEvent, SearchSummary,
 };

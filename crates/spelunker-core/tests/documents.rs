@@ -1,7 +1,7 @@
 mod common;
 
 use common::{run, write, write_pdf, write_zip};
-use spelunker_core::{preview_file, read_file_text, ContentQuery, SearchConfig};
+use spelunker_core::{preview_file, read_lines, ContentQuery, PreviewBudget, SearchConfig};
 use std::path::Path;
 
 const WORD_NS: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main""#;
@@ -343,7 +343,13 @@ fn the_whole_text_view_shows_document_text_not_a_binary_notice() {
         "view.docx",
         &(paragraph(&["first"]) + &paragraph(&["second needle"])),
     );
-    let text = read_file_text(&path, Some(&ContentQuery::literal("needle")), 1024 * 1024).unwrap();
+    let text = read_lines(
+        &path,
+        Some(&ContentQuery::literal("needle")),
+        1,
+        PreviewBudget::UNLIMITED,
+    )
+    .unwrap();
     assert!(!text.binary && !text.truncated);
     assert_eq!(text.lines.len(), 2);
     assert_eq!(text.lines[1].text, "second needle");
@@ -351,13 +357,17 @@ fn the_whole_text_view_shows_document_text_not_a_binary_notice() {
 }
 
 #[test]
-fn a_long_document_is_cut_at_a_whole_line_in_the_text_view() {
+fn a_long_document_stops_at_the_byte_budget_on_a_whole_line() {
     let root = tempfile::tempdir().unwrap();
     let body: String = (1..=500)
         .map(|number| paragraph(&[&format!("paragraph number {number}")]))
         .collect();
     let path = docx(root.path(), "long.docx", &body);
-    let text = read_file_text(&path, None, 1000).unwrap();
+    let budget = PreviewBudget {
+        lines: usize::MAX,
+        bytes: 1000,
+    };
+    let text = read_lines(&path, None, 1, budget).unwrap();
     assert!(text.truncated);
     let last = text.lines.last().unwrap();
     assert!(last.text.starts_with("paragraph number "), "{}", last.text);
@@ -421,7 +431,7 @@ fn the_preview_of_a_pdf_shows_its_text() {
         &["First line", "Second needle line"],
     );
     let query = ContentQuery::literal("needle");
-    let text = read_file_text(&path, Some(&query), 1_000_000).unwrap();
+    let text = read_lines(&path, Some(&query), 1, PreviewBudget::UNLIMITED).unwrap();
     assert!(text
         .lines
         .iter()

@@ -1,7 +1,7 @@
 mod common;
 
 use common::{run, write, write_zip};
-use spelunker_core::{preview_file, read_file_text, ContentQuery, SearchConfig};
+use spelunker_core::{preview_file, read_lines, ContentQuery, PreviewBudget, SearchConfig};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -170,6 +170,6 @@ fn the_preview_of_an_archive_shows_its_text_whatever_the_option() {
     assert!(lines
         .iter()
         .any(|line| line.is_match && line.text == "two needle"));
-    let text = read_file_text(&path, Some(&query), 1_000_000).unwrap();
+    let text = read_lines(&path, Some(&query), 1, PreviewBudget::UNLIMITED).unwrap();
     assert!(text.lines.iter().any(|line| line.text == ">> a.txt"));
 }

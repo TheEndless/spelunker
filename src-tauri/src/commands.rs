@@ -1,11 +1,11 @@
 use crate::batcher::{event_queue, forward_batches, BATCH_INTERVAL};
-use crate::dto::{PreviewLineDto, QueryRequest, SearchMessage, SearchRequest};
+use crate::dto::{FileTextDto, QueryRequest, SearchMessage, SearchRequest};
 use crate::editor_approvals::ApprovedEditors;
 use crate::search_scope::SearchScope;
 use crate::store::{LoadedSearches, SavedSearchStore};
 use spelunker_core::{
-    preview_file, search, validate_content_query, validate_name_regex as check_name_regex,
-    CancelToken,
+    count_lines as count_file_lines, preview_matches, read_lines as read_file_lines, search,
+    validate_content_query, validate_name_regex as check_name_regex, CancelToken, PreviewBudget,
 };
 use std::process::Command;
 use std::sync::Mutex;
@@ -101,6 +101,15 @@ pub async fn file_icon(extension: String, large: bool) -> tauri::ipc::Response {
     tauri::ipc::Response::new(png)
 }
 
+/// What one preview call returns at most. A line is cut to a window when it is very long, so the
+/// bytes bound the size of the answer where the number of lines alone would not.
+const PREVIEW_BUDGET: PreviewBudget = PreviewBudget {
+    lines: 5000,
+    bytes: 4 * 1024 * 1024,
+};
+
+/// The lines of a file that match `query`, each with its context. `truncated` says more matches
+/// follow the ones returned.
 #[tauri::command]
 pub async fn preview(
     scope: State<'_, SearchScope>,
@@ -108,15 +117,21 @@ pub async fn preview(
     query: QueryRequest,
     context_lines: usize,
     include_binary: bool,
-) -> Result<Vec<PreviewLineDto>, String> {
+) -> Result<FileTextDto, String> {
     scope.check(&path)?;
     let query = query.into_query();
     tauri::async_runtime::spawn_blocking(move || {
-        preview_file(path.as_ref(), &query, context_lines, include_binary)
+        preview_matches(
+            path.as_ref(),
+            &query,
+            context_lines,
+            include_binary,
+            PREVIEW_BUDGET,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
-    .map(|lines| lines.into_iter().map(PreviewLineDto::from).collect())
+    .map(Into::into)
     .map_err(|error| error.to_string())
 }
 
@@ -248,25 +263,40 @@ pub async fn folders_from_dropped_paths(paths: Vec<String>) -> Result<Vec<String
         .map_err(|error| error.to_string())
 }
 
-/// Largest text file the preview reads in one go.
-const PREVIEW_MAX_BYTES: usize = 4 * 1024 * 1024;
-
-/// The whole text of a file for the preview, with lines matching `query` marked.
+/// Up to `count` lines of a file from line `first_line` on (the first line is 1), with the lines that
+/// match `query` marked. Fewer come back when they reach the preview's size limit, and `truncated`
+/// then says more follow.
 #[tauri::command]
-pub async fn read_file_text(
+pub async fn read_lines(
     scope: State<'_, SearchScope>,
     path: String,
     query: Option<QueryRequest>,
-) -> Result<crate::dto::FileTextDto, String> {
+    first_line: u64,
+    count: usize,
+) -> Result<FileTextDto, String> {
     scope.check(&path)?;
     let query = query.map(QueryRequest::into_query);
+    let budget = PreviewBudget {
+        lines: count.min(PREVIEW_BUDGET.lines),
+        ..PREVIEW_BUDGET
+    };
     tauri::async_runtime::spawn_blocking(move || {
-        spelunker_core::read_file_text(path.as_ref(), query.as_ref(), PREVIEW_MAX_BYTES)
+        read_file_lines(path.as_ref(), query.as_ref(), first_line, budget)
     })
     .await
     .map_err(|error| error.to_string())?
     .map(Into::into)
     .map_err(|error| error.to_string())
+}
+
+/// How many lines a file has, numbered the way `read_lines` numbers them.
+#[tauri::command]
+pub async fn count_lines(scope: State<'_, SearchScope>, path: String) -> Result<u64, String> {
+    scope.check(&path)?;
+    tauri::async_runtime::spawn_blocking(move || count_file_lines(path.as_ref()))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
 }
 
 /// Whether `extension` can be offered as a file type in the save dialog: a few letters or digits.
