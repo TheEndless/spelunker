@@ -2,6 +2,7 @@
 //! No UI and no global state. Callers pass a config, a cancel token, and an event callback.
 
 mod binary_extensions;
+mod bounded_text;
 mod cancel;
 mod config;
 mod content;

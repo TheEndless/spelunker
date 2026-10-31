@@ -8,6 +8,7 @@
 //!
 //! A PDF is read by `pdf_text` and comes out the same way, as lines of text.
 
+use crate::bounded_text::{Budgeted, Limits, Lines};
 use crate::cancel::CancelToken;
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::Reader;
@@ -15,14 +16,6 @@ use std::io::{self, BufRead, BufReader, Read, Seek};
 use std::path::Path;
 use zip::result::ZipError;
 use zip::ZipArchive;
-
-/// How much XML one document may expand to in total. Real documents are far below it. A file that
-/// goes past it is a zip bomb or something no one wants searched, and is reported instead.
-const MAX_XML_BYTES: u64 = 128 * 1024 * 1024;
-
-/// How much text one document may hold. The text is kept whole in memory while it is searched, and
-/// several documents are read at once, so this is far lower than what the XML may expand to.
-const MAX_TEXT_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
@@ -52,29 +45,16 @@ pub fn is_document(path: &Path) -> bool {
 
 /// The text of a document, one line per paragraph or row, joined by line feeds.
 pub fn extract_text(path: &Path, cancel: &CancelToken) -> io::Result<String> {
-    let limits = Limits {
-        xml_bytes: MAX_XML_BYTES,
-        text_bytes: MAX_TEXT_BYTES,
-    };
-    extract_with_limits(path, cancel, limits)
+    extract_with_limits(path, cancel, Limits::STANDARD)
 }
 
 #[cfg(test)]
-fn extract_with_limit(path: &Path, cancel: &CancelToken, xml_bytes: u64) -> io::Result<String> {
+fn extract_with_limit(path: &Path, cancel: &CancelToken, read_bytes: u64) -> io::Result<String> {
     let limits = Limits {
-        xml_bytes,
-        text_bytes: MAX_TEXT_BYTES,
+        read_bytes,
+        text_bytes: Limits::STANDARD.text_bytes,
     };
     extract_with_limits(path, cancel, limits)
-}
-
-/// What one document may grow to while it is read.
-#[derive(Clone, Copy)]
-struct Limits {
-    /// Bytes of XML read from all parts together.
-    xml_bytes: u64,
-    /// Bytes of text kept.
-    text_bytes: usize,
 }
 
 fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io::Result<String> {
@@ -89,7 +69,7 @@ fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io:
         .file_names()
         .filter_map(|name| name.ok().map(|name| name.into_owned()))
         .collect();
-    let mut budget = limits.xml_bytes;
+    let mut budget = limits.read_bytes;
     let mut lines = Lines::new(limits.text_bytes);
 
     if kind == Kind::Sheet {
@@ -115,57 +95,6 @@ fn extract_with_limits(path: &Path, cancel: &CancelToken, limits: Limits) -> io:
     lines.into_text()
 }
 
-/// The lines of a document in one string, so the text is held once. Once a line would pass the
-/// limit nothing more is added, and `into_text` reports it.
-pub(crate) struct Lines {
-    text: String,
-    limit: usize,
-    overflowed: bool,
-}
-
-impl Lines {
-    pub(crate) fn new(limit: usize) -> Self {
-        Self {
-            text: String::new(),
-            limit,
-            overflowed: false,
-        }
-    }
-
-    pub(crate) fn push(&mut self, line: &str) {
-        if self.overflowed {
-            return;
-        }
-        if self.text.len() + line.len() + 1 > self.limit {
-            self.overflowed = true;
-            return;
-        }
-        if !self.text.is_empty() {
-            self.text.push('\n');
-        }
-        // A NUL would make the searcher call the text binary, and it is never part of a word.
-        if line.contains('\0') {
-            self.text.push_str(&line.replace('\0', " "));
-        } else {
-            self.text.push_str(line);
-        }
-    }
-
-    pub(crate) fn into_text(self) -> io::Result<String> {
-        if self.overflowed {
-            return Err(too_much_text(self.limit as u64));
-        }
-        Ok(self.text)
-    }
-}
-
-fn too_much_text(limit_bytes: u64) -> io::Error {
-    io::Error::other(format!(
-        "the document holds more than {} MB of text, which is more than is searched",
-        limit_bytes / (1024 * 1024)
-    ))
-}
-
 /// Why a zip could not be read, in words that help: a password protected Office file is not a zip.
 fn zip_problem(error: ZipError) -> io::Error {
     match error {
@@ -174,30 +103,6 @@ fn zip_problem(error: ZipError) -> io::Error {
             "not a readable Office or OpenDocument file (it may be password protected or damaged)",
         ),
         other => io::Error::other(format!("could not read the document: {other}")),
-    }
-}
-
-/// Counts what is read from a part against what the document is allowed to expand to, and stops
-/// reading when the search is cancelled.
-struct Budgeted<'a, R> {
-    inner: R,
-    remaining: &'a mut u64,
-    cancel: &'a CancelToken,
-    limit: u64,
-}
-
-impl<R: Read> Read for Budgeted<'_, R> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if self.cancel.is_cancelled() {
-            return Err(io::Error::other("search cancelled"));
-        }
-        let count = self.inner.read(buffer)?;
-        if count as u64 > *self.remaining {
-            *self.remaining = 0;
-            return Err(too_much_text(self.limit));
-        }
-        *self.remaining -= count as u64;
-        Ok(count)
     }
 }
 
@@ -217,7 +122,7 @@ fn open_part<'a, R: Read + Seek>(
         inner: part,
         remaining: budget,
         cancel,
-        limit: limits.xml_bytes,
+        limit: limits.read_bytes,
     }))
 }
 
@@ -673,13 +578,13 @@ mod tests {
         let part = format!("<w:document xmlns:w=\"w\">{paragraphs}</w:document>");
         archive_with(&path, &[("word/document.xml", part.as_bytes())]);
         let tight = Limits {
-            xml_bytes: MAX_XML_BYTES,
+            read_bytes: Limits::STANDARD.read_bytes,
             text_bytes: 500,
         };
         let refused = extract_with_limits(&path, &CancelToken::new(), tight).unwrap_err();
         assert!(refused.to_string().contains("more than"), "{refused}");
         let roomy = Limits {
-            xml_bytes: MAX_XML_BYTES,
+            read_bytes: Limits::STANDARD.read_bytes,
             text_bytes: 5000,
         };
         let text = extract_with_limits(&path, &CancelToken::new(), roomy).unwrap();
@@ -696,6 +601,6 @@ mod tests {
         );
         let cancel = CancelToken::new();
         cancel.cancel();
-        assert!(extract_with_limit(&path, &cancel, MAX_XML_BYTES).is_err());
+        assert!(extract_with_limit(&path, &cancel, Limits::STANDARD.read_bytes).is_err());
     }
 }
