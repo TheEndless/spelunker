@@ -1,13 +1,17 @@
 use crate::cancel::CancelToken;
 use crate::config::ContentQuery;
-use crate::content::ContentMatcher;
+use crate::content::{has_single_byte_line_ends, ContentMatcher};
 use crate::document_text::{extract_text, has_readable_text};
 use crate::line_clip::preview_line;
 use crate::model::PreviewLine;
 use grep_regex::RegexMatcher;
 use grep_searcher::{Searcher, Sink, SinkMatch};
-use std::io;
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
+
+/// Bytes read at a time when scanning a file for line ends.
+const SCAN_BUFFER_BYTES: usize = 1 << 20;
 
 /// How much one preview call may return. Lines are cut to a window when they are very long, so
 /// a count of lines alone does not bound the size of the answer.
@@ -59,6 +63,7 @@ pub fn read_lines(
         max_bytes: budget.bytes,
         bytes: 0,
         highlight: matcher.as_ref().map(ContentMatcher::regex),
+        line_offset: 0,
         lines: Vec::new(),
         more: false,
         binary: false,
@@ -72,7 +77,17 @@ pub fn read_lines(
         }
     } else {
         let every_line = every_line()?;
-        let (mut searcher, file) = every_line.open(path, 0)?;
+        let (mut searcher, mut file) = every_line.open(path, 0)?;
+        if first_line > 1 && has_single_byte_line_ends(&mut file)? {
+            match skip_lines(&mut file, first_line - 1)? {
+                Skipped::Binary => {
+                    window.binary = true;
+                    return Ok(window.into_file_text());
+                }
+                Skipped::PastTheEnd => return Ok(window.into_file_text()),
+                Skipped::Reached => window.line_offset = first_line - 1,
+            }
+        }
         searcher.search_reader(every_line.regex(), file, &mut window)?;
     }
     Ok(window.into_file_text())
@@ -85,10 +100,83 @@ pub fn count_lines(path: &Path) -> io::Result<u64> {
         return Ok(text.lines().count() as u64);
     }
     let every_line = every_line()?;
-    let (mut searcher, file) = every_line.open(path, 0)?;
+    let (mut searcher, mut file) = every_line.open(path, 0)?;
+    if has_single_byte_line_ends(&mut file)? {
+        return count_line_ends(&mut file);
+    }
     let mut counter = LineCounter::default();
     searcher.search_reader(every_line.regex(), file, &mut counter)?;
     Ok(if counter.binary { 0 } else { counter.lines })
+}
+
+/// Counts the lines of a file by its 0x0A bytes, which is what the searcher numbers them by.
+/// Zero for a file with a NUL byte.
+fn count_line_ends(file: &mut File) -> io::Result<u64> {
+    let mut buffer = vec![0; SCAN_BUFFER_BYTES];
+    let mut lines = 0;
+    let mut last_byte = b'\n';
+    loop {
+        let read = read_some(file, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let chunk = &buffer[..read];
+        if memchr::memchr(0, chunk).is_some() {
+            return Ok(0);
+        }
+        lines += memchr::memchr_iter(b'\n', chunk).count() as u64;
+        last_byte = chunk[read - 1];
+    }
+    Ok(if last_byte == b'\n' { lines } else { lines + 1 })
+}
+
+/// Where `skip_lines` left the file.
+enum Skipped {
+    /// A NUL byte is in the lines skipped.
+    Binary,
+    /// The file has no more lines than were skipped.
+    PastTheEnd,
+    /// The file is at the start of the line after the ones skipped.
+    Reached,
+}
+
+/// Moves the file past its first `count` lines (at least one) by looking for their 0x0A bytes, so
+/// reading deep into a large file does not match each line on the way.
+fn skip_lines(file: &mut File, count: u64) -> io::Result<Skipped> {
+    let mut buffer = vec![0; SCAN_BUFFER_BYTES];
+    let mut remaining = count;
+    loop {
+        let read = read_some(file, &mut buffer)?;
+        if read == 0 {
+            return Ok(Skipped::PastTheEnd);
+        }
+        let chunk = &buffer[..read];
+        let mut scanned = read;
+        for position in memchr::memchr_iter(b'\n', chunk) {
+            remaining -= 1;
+            if remaining == 0 {
+                scanned = position + 1;
+                break;
+            }
+        }
+        if memchr::memchr(0, &chunk[..scanned]).is_some() {
+            return Ok(Skipped::Binary);
+        }
+        if remaining == 0 {
+            file.seek(SeekFrom::Current(scanned as i64 - read as i64))?;
+            return Ok(Skipped::Reached);
+        }
+    }
+}
+
+/// One read that is retried when it is interrupted.
+fn read_some(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
+    loop {
+        match file.read(buffer) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            result => return result,
+        }
+    }
 }
 
 fn highlight_matcher(query: Option<&ContentQuery>) -> Option<ContentMatcher> {
@@ -105,6 +193,8 @@ struct LineWindow<'a> {
     /// Bytes of text in `lines`.
     bytes: usize,
     highlight: Option<&'a RegexMatcher>,
+    /// Lines the reader began past, which its own numbering does not count.
+    line_offset: u64,
     lines: Vec<PreviewLine>,
     /// A line at or past `end` exists.
     more: bool,
@@ -146,7 +236,10 @@ impl Sink for LineWindow<'_> {
     type Error = io::Error;
 
     fn matched(&mut self, _searcher: &Searcher, found: &SinkMatch<'_>) -> Result<bool, io::Error> {
-        self.accept(found.line_number().unwrap_or(0), found.bytes())
+        self.accept(
+            found.line_number().unwrap_or(0) + self.line_offset,
+            found.bytes(),
+        )
     }
 
     fn binary_data(&mut self, _searcher: &Searcher, _offset: u64) -> Result<bool, io::Error> {

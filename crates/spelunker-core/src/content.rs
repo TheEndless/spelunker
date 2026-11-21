@@ -235,12 +235,25 @@ pub fn preview_file(
 /// Files with a BOM return `None` because the searcher already decodes those transparently.
 /// BOM-less UTF-16 is only recognised for mostly-ASCII text, which is the common case for logs.
 fn sniff_encoding(file: &mut File) -> io::Result<Option<&'static Encoding>> {
+    Ok(detect_encoding(&read_prefix(file)?))
+}
+
+/// The first bytes of the file, which the file is then rewound to the start of.
+fn read_prefix(file: &mut File) -> io::Result<Vec<u8>> {
     let mut prefix = Vec::with_capacity(ENCODING_SNIFF_BYTES);
     file.by_ref()
         .take(ENCODING_SNIFF_BYTES as u64)
         .read_to_end(&mut prefix)?;
     file.seek(SeekFrom::Start(0))?;
-    Ok(detect_encoding(&prefix))
+    Ok(prefix)
+}
+
+/// Whether a line ends with the single byte 0x0A, as in every encoding but UTF-16, so the lines can be
+/// counted without decoding the file. The file is rewound to the start.
+pub(crate) fn has_single_byte_line_ends(file: &mut File) -> io::Result<bool> {
+    let prefix = read_prefix(file)?;
+    let utf16_bom = prefix.starts_with(&[0xFF, 0xFE]) || prefix.starts_with(&[0xFE, 0xFF]);
+    Ok(!utf16_bom && detect_bomless_utf16(&prefix).is_none())
 }
 
 pub(crate) fn detect_encoding(prefix: &[u8]) -> Option<&'static Encoding> {

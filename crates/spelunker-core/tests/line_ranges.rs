@@ -240,3 +240,82 @@ fn a_missing_file_is_an_error() {
     assert!(read_lines(&missing, None, 1, unlimited(10)).is_err());
     assert!(count_lines(&missing).is_err());
 }
+
+#[test]
+fn counting_matches_the_numbering_for_the_edge_cases() {
+    let root = tempfile::tempdir().unwrap();
+    let cases: [(&str, &[u8], u64); 7] = [
+        ("empty", b"", 0),
+        ("newline", b"\n", 1),
+        ("blank_lines", b"\n\n\n", 3),
+        ("terminated", b"a\nb\n", 2),
+        ("unterminated", b"a\nb", 2),
+        ("crlf", b"a\r\nb\r\n", 2),
+        ("one_unterminated", b"abc", 1),
+    ];
+    for (name, bytes, expected) in cases {
+        let path = write(root.path(), &format!("{name}.txt"), bytes);
+        assert_eq!(count_lines(&path).unwrap(), expected, "{name}");
+        let read = read_lines(&path, None, 1, unlimited(100)).unwrap();
+        assert_eq!(read.lines.len() as u64, expected, "{name} read");
+    }
+}
+
+#[test]
+fn lines_that_straddle_the_read_buffer_are_counted_and_numbered_once() {
+    let root = tempfile::tempdir().unwrap();
+    let text: String = (1..=400_000)
+        .map(|number| format!("{number:08}\n"))
+        .collect();
+    let path = write(root.path(), "straddle.txt", text.as_bytes());
+    assert_eq!(count_lines(&path).unwrap(), 400_000);
+    for first in [116_508, 116_509, 116_510, 232_000, 399_999, 400_000] {
+        let file = read_lines(&path, None, first, unlimited(2)).unwrap();
+        let expected: Vec<String> = (first..=400_000.min(first + 1))
+            .map(|number| format!("{number:08}"))
+            .collect();
+        let got: Vec<String> = file.lines.iter().map(|line| line.text.clone()).collect();
+        assert_eq!(got, expected, "from line {first}");
+        assert_eq!(file.lines[0].line_number, first);
+        assert_eq!(file.truncated, first + 1 < 400_000, "from line {first}");
+    }
+}
+
+#[test]
+fn a_nul_in_the_lines_skipped_makes_the_file_binary() {
+    let root = tempfile::tempdir().unwrap();
+    let mut bytes = b"one\ntwo\0\nthree\n".to_vec();
+    bytes.extend(std::iter::repeat_n(b"filler\n", 5000).flatten());
+    let path = write(root.path(), "late.bin", &bytes);
+    let file = read_lines(&path, None, 4000, unlimited(3)).unwrap();
+    assert!(file.binary);
+    assert!(file.lines.is_empty());
+    assert_eq!(count_lines(&path).unwrap(), 0);
+}
+
+#[test]
+fn a_windows_1252_file_is_numbered_and_decoded_after_the_lines_skipped() {
+    let root = tempfile::tempdir().unwrap();
+    let mut bytes = b"r\xe9sum\xe9\n".to_vec();
+    for _ in 0..2999 {
+        bytes.extend_from_slice(b"plain line\n");
+    }
+    bytes.extend_from_slice(b"caf\xe9\nna\xefve\n");
+    let path = write(root.path(), "old.txt", &bytes);
+    let file = read_lines(&path, None, 3001, unlimited(2)).unwrap();
+    assert_eq!(numbered(&file), [(3001, "café"), (3002, "naïve")]);
+    assert_eq!(count_lines(&path).unwrap(), 3002);
+}
+
+#[test]
+fn a_bomless_utf16_file_is_counted_and_numbered_by_its_text() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(
+        root.path(),
+        "wide.txt",
+        &utf16le("one\ntwo\nthree\nfour\n", false),
+    );
+    assert_eq!(count_lines(&path).unwrap(), 4);
+    let file = read_lines(&path, None, 3, unlimited(5)).unwrap();
+    assert_eq!(numbered(&file), [(3, "three"), (4, "four")]);
+}
