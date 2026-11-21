@@ -42,6 +42,20 @@ describe('addLines', () => {
     expect(marked[0][1].isMatch).toBe(true);
   });
 
+  it('accepts lines in any order and keeps the last of a repeated line', () => {
+    const merged = addLines(addLines([], lines(1, 2)), [line(6), line(4), line(5), line(4, true)]);
+    expect(numbersOf(merged)).toEqual([[1, 2], [4, 5, 6]]);
+    expect(merged[1][0].isMatch).toBe(true);
+  });
+
+  it('keeps the runs it did not touch as they were, so a large file is not copied for each section', () => {
+    const runs = addLines([], lines(1, 2, 10, 11, 20, 21));
+    const merged = addLines(runs, lines(12, 13));
+    expect(merged[0]).toBe(runs[0]);
+    expect(merged[2]).toBe(runs[2]);
+    expect(numbersOf(merged)).toEqual([[1, 2], [10, 11, 12, 13], [20, 21]]);
+  });
+
   it('does not change the runs it was given', () => {
     const runs = addLines([], lines(1, 2));
     addLines(runs, lines(3));

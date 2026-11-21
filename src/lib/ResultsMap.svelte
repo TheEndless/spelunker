@@ -354,10 +354,8 @@
   }
 
   function onPointerMove(event: PointerEvent) {
-    const box = stage.getBoundingClientRect();
     pointerInside = true;
-    pointerX = event.clientX - box.left;
-    pointerY = event.clientY - box.top;
+    ({ x: pointerX, y: pointerY } = stagePoint(event));
     tooltipX = pointerX;
     tooltipY = pointerY;
     setHover(client.index ? client.index.at(pointerX, pointerY) : -1);
@@ -368,9 +366,7 @@
    * two pixels wide names its neighbor, so the menu looks up what the pointer was over when it went down.
    */
   function onPointerDown(event: PointerEvent) {
-    const box = stage.getBoundingClientRect();
-    pointerX = event.clientX - box.left;
-    pointerY = event.clientY - box.top;
+    ({ x: pointerX, y: pointerY } = stagePoint(event));
   }
 
   function onPointerLeave() {

@@ -19,25 +19,77 @@ export type Row = { kind: 'line'; line: PreviewLine } | ({ kind: 'gap' } & Gap);
 /** Which end of a gap to load from: the lines after the run above it, those before the run below it, or all of it. */
 export type Expand = 'below' | 'above' | 'all';
 
-/** The runs with `incoming` lines added. A line already loaded is replaced, and runs that now touch become one. */
+/**
+ * The runs with `incoming` lines added. A line already loaded is replaced, and runs that now touch become one.
+ * Runs the new lines do not reach or touch are returned as they were, so a large file is not copied for each section.
+ */
 export function addLines(runs: Run[], incoming: PreviewLine[]): Run[] {
-  const byNumber = new Map<number, PreviewLine>();
-  for (const run of runs) {
-    for (const line of run) byNumber.set(line.lineNumber, line);
-  }
-  for (const line of incoming) byNumber.set(line.lineNumber, line);
+  const added = inFileOrder(incoming);
+  if (added.length === 0) return runs;
+  const lowest = added[0].lineNumber;
+  const highest = added[added.length - 1].lineNumber;
 
-  const merged: Run[] = [];
+  const before = runs.filter((run) => run[run.length - 1].lineNumber < lowest - 1);
+  const after = runs.filter((run) => run[0].lineNumber > highest + 1);
+  const touched = runs.slice(before.length, runs.length - after.length);
+
+  const merged = touchedAllBefore(touched, lowest) ? appendRuns(touched, added) : runsOf(mergeInFileOrder(touched.flat(), added));
+  return [...before, ...merged, ...after];
+}
+
+/** Whether every touched line is before `lineNumber`, as when scrolling loads the lines after the last run. */
+function touchedAllBefore(touched: Run[], lineNumber: number): boolean {
+  return touched.length === 0 || touched[touched.length - 1].at(-1)!.lineNumber < lineNumber;
+}
+
+/** The runs with `added` after them, joined to the last run when they follow on from it. Copies only that last run. */
+function appendRuns(runs: Run[], added: PreviewLine[]): Run[] {
+  const [first, ...rest] = runsOf(added);
+  const last = runs.at(-1);
+  if (last && last.at(-1)!.lineNumber + 1 === first[0].lineNumber) return [...runs.slice(0, -1), last.concat(first), ...rest];
+  return [...runs, first, ...rest];
+}
+
+/** Lines in file order as runs with no line missing. */
+function runsOf(lines: PreviewLine[]): Run[] {
+  const runs: Run[] = [];
   let current: Run = [];
-  for (const lineNumber of [...byNumber.keys()].sort((left, right) => left - right)) {
+  for (const entry of lines) {
     const previous = current[current.length - 1];
-    if (previous && lineNumber !== previous.lineNumber + 1) {
-      merged.push(current);
+    if (previous && entry.lineNumber !== previous.lineNumber + 1) {
+      runs.push(current);
       current = [];
     }
-    current.push(byNumber.get(lineNumber)!);
+    current.push(entry);
   }
-  if (current.length > 0) merged.push(current);
+  runs.push(current);
+  return runs;
+}
+
+/** The lines by line number, a repeated line once (the last one given). */
+function inFileOrder(lines: PreviewLine[]): PreviewLine[] {
+  const ordered = lines.every((entry, index) => index === 0 || entry.lineNumber > lines[index - 1].lineNumber)
+    ? lines
+    : [...lines].sort((left, right) => left.lineNumber - right.lineNumber);
+  return ordered.filter((entry, index) => index === ordered.length - 1 || ordered[index + 1].lineNumber !== entry.lineNumber);
+}
+
+/** Two lists of lines in file order as one, `added` winning where both have a line. */
+function mergeInFileOrder(loaded: PreviewLine[], added: PreviewLine[]): PreviewLine[] {
+  const merged: PreviewLine[] = [];
+  let loadedIndex = 0;
+  let addedIndex = 0;
+  while (loadedIndex < loaded.length && addedIndex < added.length) {
+    const loadedNumber = loaded[loadedIndex].lineNumber;
+    const addedNumber = added[addedIndex].lineNumber;
+    if (loadedNumber < addedNumber) merged.push(loaded[loadedIndex++]);
+    else {
+      if (loadedNumber === addedNumber) loadedIndex++;
+      merged.push(added[addedIndex++]);
+    }
+  }
+  while (loadedIndex < loaded.length) merged.push(loaded[loadedIndex++]);
+  while (addedIndex < added.length) merged.push(added[addedIndex++]);
   return merged;
 }
 

@@ -229,6 +229,7 @@
     try {
       let next = first;
       while (next <= last && loadedCharacters < MAX_LOADED_CHARACTERS) {
+        loadingFromLine = next;
         const result = await readLines(path, searched, next, last - next + 1);
         if (mine !== generation) return received;
         if (result.lines.length === 0) break;
