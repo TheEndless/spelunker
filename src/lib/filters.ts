@@ -140,6 +140,7 @@ export interface FilterState {
   modified: DateFilter;
   created: DateFilter;
   multiLine: boolean;
+  respectGitignore: boolean;
 }
 
 /** How many filters are switched on, for the badge on the panel header. */
@@ -149,5 +150,6 @@ export function activeFilterCount(state: FilterState): number {
     state.modified.mode !== 'any',
     state.created.mode !== 'any',
     state.multiLine,
+    state.respectGitignore,
   ].filter(Boolean).length;
 }

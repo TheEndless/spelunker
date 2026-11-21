@@ -19,6 +19,7 @@ function everythingOn(): Criteria {
   criteria.modified = { ...emptyDateFilter(), mode: 'within', amount: '7', unit: 'days' };
   criteria.created = { ...emptyDateFilter(), mode: 'before', date: '2026-01-01' };
   criteria.multiLine = true;
+  criteria.respectGitignore = true;
   return criteria;
 }
 
@@ -169,18 +170,23 @@ describe('summarizeFilters', () => {
     expect(labelsFor((c) => (c.multiLine = true))).toEqual(['Multi-line']);
   });
 
+  it('describes skipping what git ignores', () => {
+    expect(labelsFor((c) => (c.respectGitignore = true))).toEqual(['Skip git-ignored files']);
+  });
+
   it('ignores a size filter whose mode is any even with leftover values', () => {
     expect(labelsFor((c) => (c.size = { ...c.size, mode: 'any', value: '5' }))).toEqual([]);
   });
 
-  it('keeps the order size, modified, created, multi-line', () => {
+  it('keeps the order size, modified, created, multi-line, git-ignored', () => {
     const items = summarizeFilters(everythingOn());
-    expect(items.map((item) => item.id)).toEqual(['size', 'modified', 'created', 'multiLine']);
+    expect(items.map((item) => item.id)).toEqual(['size', 'modified', 'created', 'multiLine', 'respectGitignore']);
     expect(items.map((item) => item.label)).toEqual([
       'Size over 1 MB',
       'Modified in the last 7 days',
       'Created before 2026-01-01',
       'Multi-line',
+      'Skip git-ignored files',
     ]);
   });
 
@@ -193,7 +199,7 @@ describe('summarizeFilters', () => {
 });
 
 describe('clearFilter', () => {
-  const ids: FilterId[] = ['size', 'modified', 'created', 'multiLine'];
+  const ids: FilterId[] = ['size', 'modified', 'created', 'multiLine', 'respectGitignore'];
 
   it('resets size only', () => {
     const cleared = clearFilter(everythingOn(), 'size');
@@ -202,6 +208,7 @@ describe('clearFilter', () => {
       'modified',
       'created',
       'multiLine',
+      'respectGitignore',
     ]);
   });
 
@@ -212,6 +219,7 @@ describe('clearFilter', () => {
       'size',
       'created',
       'multiLine',
+      'respectGitignore',
     ]);
   });
 
@@ -222,6 +230,7 @@ describe('clearFilter', () => {
       'size',
       'modified',
       'multiLine',
+      'respectGitignore',
     ]);
   });
 
@@ -232,7 +241,14 @@ describe('clearFilter', () => {
       'size',
       'modified',
       'created',
+      'respectGitignore',
     ]);
+  });
+
+  it('resets respectGitignore only', () => {
+    const cleared = clearFilter(everythingOn(), 'respectGitignore');
+    expect(cleared.respectGitignore).toBe(false);
+    expect(cleared.multiLine).toBe(true);
   });
 
   it('leaves unrelated criteria untouched', () => {
@@ -270,13 +286,14 @@ describe('clearFilter', () => {
 });
 
 describe('clearAllFilters', () => {
-  it('resets all four filters', () => {
+  it('resets all five filters', () => {
     const cleared = clearAllFilters(everythingOn());
     expect(summarizeFilters(cleared)).toEqual([]);
     expect(cleared.size).toEqual(emptySizeFilter());
     expect(cleared.modified).toEqual(emptyDateFilter());
     expect(cleared.created).toEqual(emptyDateFilter());
     expect(cleared.multiLine).toBe(false);
+    expect(cleared.respectGitignore).toBe(false);
   });
 
   it('returns a new object and does not mutate the input', () => {

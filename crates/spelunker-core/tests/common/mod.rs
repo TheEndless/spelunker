@@ -81,6 +81,46 @@ pub fn utf16le(text: &str, with_bom: bool) -> Vec<u8> {
     bytes
 }
 
+/// Writes a one page PDF whose text is `lines`, one per row, in the standard Helvetica font.
+pub fn write_pdf(root: &Path, relative: &str, lines: &[&str]) -> PathBuf {
+    let mut rows = String::from("BT /F1 12 Tf 14 TL 72 720 Td\n");
+    for line in lines {
+        let escaped = line
+            .replace('\\', "\\\\")
+            .replace('(', "\\(")
+            .replace(')', "\\)");
+        rows.push_str(&format!("({escaped}) Tj T*\n"));
+    }
+    rows.push_str("ET");
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{rows}\nendstream", rows.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
+            .to_string(),
+    ];
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (index, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj\n{body}\nendobj\n", index + 1));
+    }
+    let xref = pdf.len();
+    pdf.push_str(&format!(
+        "xref\n0 {}\n0000000000 65535 f \n",
+        objects.len() + 1
+    ));
+    for offset in offsets {
+        pdf.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+        objects.len() + 1
+    ));
+    write(root, relative, pdf.as_bytes())
+}
+
 pub fn utf16be(text: &str, with_bom: bool) -> Vec<u8> {
     let mut bytes = if with_bom { vec![0xFE, 0xFF] } else { vec![] };
     for unit in text.encode_utf16() {
@@ -180,5 +220,22 @@ pub fn write_long_path_file(root: &Path, file_name: &str, bytes: &[u8]) -> PathB
         "fixture path must exceed MAX_PATH"
     );
     fs::write(&path, bytes).unwrap();
+    path
+}
+
+/// Writes a zip archive (what Office and OpenDocument files are) holding the given named parts.
+/// Parts are deflated, as real documents are.
+pub fn write_zip(root: &Path, relative: &str, parts: &[(&str, &str)]) -> PathBuf {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+    let path = root.join(relative);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut archive = zip::ZipWriter::new(fs::File::create(&path).unwrap());
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (name, content) in parts {
+        archive.start_file(*name, options).unwrap();
+        archive.write_all(content.as_bytes()).unwrap();
+    }
+    archive.finish().unwrap();
     path
 }

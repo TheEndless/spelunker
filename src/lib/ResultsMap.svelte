@@ -354,13 +354,19 @@
   }
 
   function onPointerMove(event: PointerEvent) {
-    const box = stage.getBoundingClientRect();
     pointerInside = true;
-    pointerX = event.clientX - box.left;
-    pointerY = event.clientY - box.top;
+    ({ x: pointerX, y: pointerY } = stagePoint(event));
     tooltipX = pointerX;
     tooltipY = pointerY;
     setHover(client.index ? client.index.at(pointerX, pointerY) : -1);
+  }
+
+  /**
+   * The contextmenu event reports the pointer rounded down to whole pixels, which on a rectangle under
+   * two pixels wide names its neighbor, so the menu looks up what the pointer was over when it went down.
+   */
+  function onPointerDown(event: PointerEvent) {
+    ({ x: pointerX, y: pointerY } = stagePoint(event));
   }
 
   function onPointerLeave() {
@@ -562,7 +568,7 @@
       void openMenuAtSelection();
       return;
     }
-    const row = rowOfRect(rectAt(event));
+    const row = rowOfRect(client.index ? client.index.at(pointerX, pointerY) : -1);
     if (!row) return;
     onSelect(row);
     void onContextMenu(row, event.clientX, event.clientY);
@@ -762,6 +768,7 @@
     aria-describedby="map-summary"
     bind:this={stage}
     onpointermove={onPointerMove}
+    onpointerdown={onPointerDown}
     onpointerleave={onPointerLeave}
     onclick={onStageClick}
     ondblclick={onStageDoubleClick}

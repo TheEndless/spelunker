@@ -1,26 +1,32 @@
 <script lang="ts">
   import { focusScope } from './focusScope';
+  import type { Criteria } from './criteria';
   import Icon from './Icon.svelte';
+  import { searchLabel } from './searchHistory';
   import { searchNameExists, validateSearchName, type SavedSearch } from './savedSearches';
 
   interface Props {
     searches: SavedSearch[];
+    /** The searches run lately, newest first. */
+    recent: Criteria[];
     notice: string | null;
     onRecall: (search: SavedSearch) => void;
+    onRecallRecent: (criteria: Criteria) => void;
+    onClearRecent: () => void;
     onSave: (name: string) => void;
     onDelete: (name: string) => void;
   }
 
-  let { searches, notice, onRecall, onSave, onDelete }: Props = $props();
+  let { searches, recent, notice, onRecall, onRecallRecent, onClearRecent, onSave, onDelete }: Props = $props();
 
   let open = $state(false);
   let name = $state('');
   let root: HTMLDivElement;
 
-  // Deleting a saved search destroys the button that had focus. Move focus to a neighbour that remains.
+  // Deleting a saved search, or clearing the recent ones, destroys the button that had focus. Move focus to a neighbour that remains.
   let previousCount = 0;
   $effect(() => {
-    const count = searches.length;
+    const count = searches.length + recent.length;
     const lostOne = open && count < previousCount;
     previousCount = count;
     if (!lostOne) return;
@@ -90,6 +96,30 @@
             </li>
           {/each}
         </ul>
+      {/if}
+
+      {#if recent.length > 0}
+        <div class="recent">
+          <div class="recent-head">
+            <span>Recent</span>
+            <button type="button" class="clear" title="Forget the recent searches" onclick={onClearRecent}>Clear</button>
+          </div>
+          <ul>
+            {#each recent as search, position (position)}
+              <li>
+                <button
+                  type="button"
+                  class="recall"
+                  title="Load this search: {search.lookIn}"
+                  onclick={() => {
+                    onRecallRecent(search);
+                    open = false;
+                  }}>{searchLabel(search)} <span class="where">{search.lookIn}</span></button
+                >
+              </li>
+            {/each}
+          </ul>
+        </div>
       {/if}
 
       <form
@@ -165,6 +195,33 @@
   .empty {
     margin: 0;
     padding: 6px 8px;
+    color: var(--text-muted);
+  }
+  .recent {
+    display: grid;
+    gap: 2px;
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+  }
+  .recent-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+    color: var(--text-muted);
+    font-size: var(--text-small);
+  }
+  .clear {
+    background: none;
+    border: 0;
+    padding: 2px 4px;
+    color: var(--text-muted);
+    text-decoration: underline;
+  }
+  .clear:hover {
+    color: var(--text);
+  }
+  .where {
     color: var(--text-muted);
   }
   .save {

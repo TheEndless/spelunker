@@ -24,7 +24,13 @@ export interface Criteria {
   subfolders: boolean;
   includeHidden: boolean;
   includeBinary: boolean;
+  /** Look at the text inside Office, OpenDocument and PDF files (docx, xlsx, pptx, odt, ods, odp, pdf). */
+  searchDocuments: boolean;
+  /** Look at the text files inside archives (zip, tar, gzip). */
+  searchArchives: boolean;
   followLinks: boolean;
+  /** Skip what the .gitignore files of the repositories searched name. */
+  respectGitignore: boolean;
   size: SizeFilter;
   modified: DateFilter;
   created: DateFilter;
@@ -42,7 +48,10 @@ export const DEFAULT_CRITERIA: Criteria = {
   subfolders: true,
   includeHidden: false,
   includeBinary: false,
+  searchDocuments: false,
+  searchArchives: false,
   followLinks: false,
+  respectGitignore: false,
   size: emptySizeFilter(),
   modified: emptyDateFilter(),
   created: emptyDateFilter(),
@@ -107,7 +116,10 @@ export function normalizeCriteria(raw: unknown): Criteria {
     subfolders: pick(source, 'subfolders', defaults.subfolders),
     includeHidden: pick(source, 'includeHidden', defaults.includeHidden),
     includeBinary: pick(source, 'includeBinary', defaults.includeBinary),
+    searchDocuments: pick(source, 'searchDocuments', defaults.searchDocuments),
+    searchArchives: pick(source, 'searchArchives', defaults.searchArchives),
     followLinks: pick(source, 'followLinks', defaults.followLinks),
+    respectGitignore: pick(source, 'respectGitignore', defaults.respectGitignore),
     size: normalizeSize(source.size),
     modified: normalizeDate(source.modified),
     created: normalizeDate(source.created),
@@ -121,5 +133,6 @@ export function countActiveFilters(criteria: Criteria): number {
     modified: criteria.modified,
     created: criteria.created,
     multiLine: criteria.multiLine,
+    respectGitignore: criteria.respectGitignore,
   });
 }

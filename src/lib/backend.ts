@@ -2,7 +2,7 @@ import { Channel, convertFileSrc, invoke } from '@tauri-apps/api/core';
 import type { EditorLaunch } from './editors';
 import { createSelfDropFilter, OutgoingPaths, type FolderDropEvent } from './fileDrag';
 import type { MillisRange } from './filters';
-import type { FileText, PreviewLine, QueryOptions, SearchMessage, UpdateInfo } from './types';
+import type { FileText, QueryOptions, SearchMessage, UpdateInfo } from './types';
 
 export interface SearchRequest {
   roots: string[];
@@ -12,7 +12,10 @@ export interface SearchRequest {
   maxDepth: number | null;
   includeHidden: boolean;
   includeBinary: boolean;
+  searchDocuments: boolean;
+  searchArchives: boolean;
   followLinks: boolean;
+  respectGitignore: boolean;
   nameIsRegex: boolean;
   minSize: number | null;
   maxSize: number | null;
@@ -47,9 +50,9 @@ export async function previewFile(
   query: QueryOptions,
   contextLines: number,
   includeBinary: boolean,
-): Promise<PreviewLine[]> {
+): Promise<FileText> {
   if (!insideTauri) return (await mock()).previewFile(path, query, contextLines);
-  return invoke<PreviewLine[]>('preview', { path, query, contextLines, includeBinary });
+  return invoke<FileText>('preview', { path, query, contextLines, includeBinary });
 }
 
 export async function openPath(path: string): Promise<void> {
@@ -169,10 +172,20 @@ export async function saveSavedSearches(json: string): Promise<void> {
   await invoke('save_saved_searches', { json });
 }
 
-/** Reads a whole text file for the preview. Lines containing `query` are flagged when it is given. */
-export async function readFileText(path: string, query: QueryOptions | null): Promise<FileText> {
-  if (!insideTauri) return (await mock()).readFileText(path, query);
-  return invoke<FileText>('read_file_text', { path, query });
+/**
+ * Up to `count` lines of a text file from line `firstLine` on (the first line is 1). Lines containing
+ * `query` are flagged when it is given. Fewer come back when they reach the preview's size limit, and
+ * `truncated` then says more follow.
+ */
+export async function readLines(path: string, query: QueryOptions | null, firstLine: number, count: number): Promise<FileText> {
+  if (!insideTauri) return (await mock()).readLines(path, query, firstLine, count);
+  return invoke<FileText>('read_lines', { path, query, firstLine, count });
+}
+
+/** How many lines a text file has, counted the way `readLines` numbers them. */
+export async function countLines(path: string): Promise<number> {
+  if (!insideTauri) return (await mock()).countLines(path);
+  return invoke<number>('count_lines', { path });
 }
 
 /**

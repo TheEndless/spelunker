@@ -60,13 +60,24 @@ export function fileCategoryIndex(name: string): number {
   return CATEGORY_INDEX.get(fileCategory(name))!;
 }
 
-export type PreviewKind = 'image' | 'pdf' | 'audio' | 'video' | 'text' | 'other';
+export type PreviewKind = 'image' | 'pdf' | 'audio' | 'video' | 'text' | 'extracted' | 'other';
 
 /** Formats the webview can show as pictures, even though some are in the wider "image" category. */
 const WEBVIEW_IMAGES = new Set(words('png jpg jpeg gif webp bmp ico svg avif'));
 /** Audio and video the webview can decode. Other media falls back to a description card. */
 const WEBVIEW_AUDIO = new Set(words('mp3 wav ogg oga flac m4a aac opus'));
 const WEBVIEW_VIDEO = new Set(words('mp4 webm m4v mov ogv'));
+
+/**
+ * Formats whose text the engine reads out of the file: Office and OpenDocument documents (not the
+ * older binary doc, xls and ppt) and archives (zip and the formats that are zip files, tar, gzip).
+ */
+const READABLE_FORMATS = new Set(
+  words(
+    'docx docm dotx dotm xlsx xlsm xltx xltm pptx pptm potx potm ppsx ppsm odt ods odp ott ots otp ' +
+      'zip jar war ear nupkg vsix whl epub tar tgz gz',
+  ),
+);
 
 /** How the preview pane should present a file. Unknown extensions are tried as text. */
 export function previewKind(name: string): PreviewKind {
@@ -75,8 +86,9 @@ export function previewKind(name: string): PreviewKind {
   if (WEBVIEW_AUDIO.has(extension)) return 'audio';
   if (WEBVIEW_VIDEO.has(extension)) return 'video';
   if (extension === 'pdf') return 'pdf';
+  if (READABLE_FORMATS.has(extension)) return 'extracted';
   const category = BY_EXTENSION.get(extension);
   if (category === undefined || category === 'code' || category === 'text' || category === 'data') return 'text';
-  // Images the webview cannot decode (tif, heic), more media, archives, executables, Office files.
+  // Images the webview cannot decode (tif, heic), more media, other archives, executables, older Office files.
   return 'other';
 }

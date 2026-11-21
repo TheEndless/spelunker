@@ -106,6 +106,7 @@ await ev(`document.querySelector('[role=grid]').focus()`);
 const selectedName = () => ev(`document.querySelector('.row.selected .cell')?.innerText`);
 await key('Home');
 const first = await selectedName();
+const activeRowIndex = async () => Number((await ev(`document.querySelector('[role=grid]').getAttribute('aria-activedescendant')`)).replace('result-row-', ''));
 check('Home selects the first row', (await ev(`document.querySelector('[role=grid]').getAttribute('aria-activedescendant')`)) === 'result-row-0', first);
 await key('ArrowDown');
 check('ArrowDown moves one row', (await ev(`document.querySelector('[role=grid]').getAttribute('aria-activedescendant')`)) === 'result-row-1');
@@ -113,8 +114,11 @@ await key('End');
 const rowTotal = await ev(`document.querySelectorAll('.body .row').length`);
 check('End selects the last row', (await ev(`document.querySelector('[role=grid]').getAttribute('aria-activedescendant')`)) === `result-row-${rowTotal - 1}`, rowTotal);
 await key('ArrowUp');
+const rowIndexBeforePageUp = await activeRowIndex();
 await key('PageUp');
-check('PageUp from near the end moves up (clamped at the top for a short list)', (await ev(`document.querySelector('[role=grid]').getAttribute('aria-activedescendant')`)) === 'result-row-0');
+const rowIndexAfterPageUp = await activeRowIndex();
+// How far a page goes depends on the window height, and how many rows the search finds on the repository, so only the direction is checked, and the top for a list that is shorter than a page.
+check('PageUp from near the end moves up', rowIndexAfterPageUp < rowIndexBeforePageUp && (rowTotal > 16 || rowIndexAfterPageUp === 0), { rowTotal, rowIndexBeforePageUp, rowIndexAfterPageUp });
 
 // ---------- context menu from the keyboard
 // Inside the app the menu is Windows' own, requested over IPC (stubbed in PAGE_HELPERS, never shown).

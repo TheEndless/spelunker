@@ -300,6 +300,7 @@
     const request = buildSearchRequest($state.snapshot(preferences.criteria), Date.now());
     if (!request.ok) return;
     preferences.rememberFolders();
+    preferences.rememberSearch();
     preferences.save();
     changeSelection(EMPTY_SELECTION);
     searchedCriteria = $state.snapshot(preferences.criteria);
@@ -408,7 +409,8 @@
     if (!query || query.text === '') return;
     try {
       const found = await previewFile(row.path, query, 0, session.includeBinary);
-      await copy(found.filter((line) => line.isMatch).map((line) => line.text).join('\r\n'));
+      await copy(found.lines.filter((line) => line.isMatch).map((line) => line.text).join('\r\n'));
+      if (found.truncated) say('info', `Copied the first ${found.lines.length.toLocaleString('en-US')} matching lines. The file has more than can be listed here.`);
     } catch (error) {
       say('error', `Could not read the matching lines: ${error}`);
     }
@@ -509,6 +511,7 @@
       bind:this={searchBar}
       {preferences}
       savedSearches={savedSearches.searches}
+      recentSearches={preferences.recentSearches}
       savedNotice={savedSearches.notice}
       running={session.running}
       stopping={session.stopping}
@@ -522,6 +525,10 @@
       onSaveSearch={(name) => savedSearches.save(name, $state.snapshot(preferences.criteria))}
       onRecallSearch={recallSearch}
       onDeleteSearch={(name) => savedSearches.remove(name)}
+      onClearRecentSearches={() => {
+        preferences.clearRecentSearches();
+        preferences.save();
+      }}
       onExport={exportResults}
       onOpenSettings={() => (settingsOpen = true)}
     />

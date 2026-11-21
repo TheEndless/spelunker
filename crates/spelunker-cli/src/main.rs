@@ -70,9 +70,21 @@ struct Args {
     #[arg(long)]
     binary: bool,
 
+    /// Search the text inside Office, OpenDocument and PDF files (docx, xlsx, pptx, odt, ods, odp, pdf)
+    #[arg(long)]
+    documents: bool,
+
+    /// Search the text files inside archives (zip, jar, tar, tgz, gz and more)
+    #[arg(long)]
+    archives: bool,
+
     /// Follow junctions and symlinked folders (loops are detected)
     #[arg(long)]
     follow_links: bool,
+
+    /// Skip what .gitignore files, .git/info/exclude and the global git ignore file name
+    #[arg(long)]
+    respect_gitignore: bool,
 }
 
 /// `text` with every control character except the tab shown as an escape such as `\x1b`. File names
@@ -122,7 +134,10 @@ fn main() -> ExitCode {
     };
     config.include_hidden = args.hidden;
     config.include_binary = args.binary;
+    config.search_documents = args.documents;
+    config.search_archives = args.archives;
     config.follow_links = args.follow_links;
+    config.respect_gitignore = args.respect_gitignore;
 
     let cancel = CancelToken::new();
     let handler_token = cancel.clone();

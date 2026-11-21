@@ -21,7 +21,10 @@ describe('buildSearchRequest', () => {
         subfolders: false,
         includeHidden: true,
         includeBinary: true,
+        searchDocuments: true,
+        searchArchives: true,
         followLinks: true,
+        respectGitignore: true,
       }),
       NOW,
     );
@@ -35,7 +38,10 @@ describe('buildSearchRequest', () => {
       recurse: false,
       includeHidden: true,
       includeBinary: true,
+      searchDocuments: true,
+      searchArchives: true,
       followLinks: true,
+      respectGitignore: true,
     });
   });
 

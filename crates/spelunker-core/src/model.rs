@@ -3,24 +3,40 @@ use std::ops::Range;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
+/// What was cut off a line too long to keep whole (a minified file is one line of many
+/// megabytes). The text that is kept, with these two counts, adds up to the line's length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Clip {
+    /// Bytes of the line before the kept text.
+    pub before_bytes: u64,
+    /// Bytes of the line after the kept text.
+    pub after_bytes: u64,
+}
+
 /// One matching line inside a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hit {
     pub line_number: u64,
-    /// Decoded text of the line without its line terminator.
+    /// Decoded text of the line without its line terminator. A very long line is cut to a
+    /// window around its first match.
     pub line: String,
     /// Byte ranges into `line` for each match, ready for highlighting.
     pub match_ranges: Vec<Range<usize>>,
+    /// Set when `line` is only part of the line.
+    pub clip: Option<Clip>,
 }
 
 /// One line in a file preview: a match or a line of surrounding context.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PreviewLine {
     pub line_number: u64,
+    /// A very long line is cut to a window around its first match, or to its start when it has none.
     pub text: String,
     pub is_match: bool,
     /// Byte ranges into `text`. Empty for context lines.
     pub match_ranges: Vec<Range<usize>>,
+    /// Set when `text` is only part of the line.
+    pub clip: Option<Clip>,
 }
 
 /// A file that passed every criterion. `hits` is empty for name-only searches.

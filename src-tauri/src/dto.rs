@@ -6,7 +6,7 @@ use spelunker_core::{
     ContentQuery, FileResult, PreviewLine, SearchConfig, SearchSummary, SizeRange, TimeRange,
 };
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 #[derive(Deserialize)]
@@ -42,7 +42,16 @@ pub struct SearchRequest {
     pub max_depth: Option<usize>,
     pub include_hidden: bool,
     pub include_binary: bool,
+    /// Search the text inside Office and OpenDocument files. Absent in requests from before this option existed.
+    #[serde(default)]
+    pub search_documents: bool,
+    /// Search the text files inside archives. Absent in requests from before this option existed.
+    #[serde(default)]
+    pub search_archives: bool,
     pub follow_links: bool,
+    /// Skip what git would ignore. Absent in requests from before this option existed.
+    #[serde(default)]
+    pub respect_gitignore: bool,
     /// When set, `name_patterns` is a regex on the file name instead of a wildcard list.
     pub name_is_regex: bool,
     pub min_size: Option<u64>,
@@ -92,6 +101,13 @@ impl SearchRequest {
                     self.include_hidden,
                     self.follow_links,
                 )
+                && (!self.respect_gitignore
+                    || spelunker_core::gitignore_reaches(
+                        Path::new(outer),
+                        Path::new(inner),
+                        self.include_hidden,
+                        self.follow_links,
+                    ))
         });
         let mut config = SearchConfig::new(roots.into_iter().map(PathBuf::from).collect());
         if self.name_is_regex {
@@ -110,7 +126,10 @@ impl SearchRequest {
         config.max_depth = self.max_depth;
         config.include_hidden = self.include_hidden;
         config.include_binary = self.include_binary;
+        config.search_documents = self.search_documents;
+        config.search_archives = self.search_archives;
         config.follow_links = self.follow_links;
+        config.respect_gitignore = self.respect_gitignore;
         config
     }
 }
@@ -214,6 +233,16 @@ pub struct PreviewLineDto {
     pub is_match: bool,
     /// Offsets in UTF-16 code units, so JavaScript can slice `text` directly.
     pub match_ranges: Vec<Utf16Range>,
+    /// What was cut off a line too long to keep whole. Absent for a line shown whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipDto>,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipDto {
+    pub before_bytes: u64,
+    pub after_bytes: u64,
 }
 
 impl From<PreviewLine> for PreviewLineDto {
@@ -228,11 +257,15 @@ impl From<PreviewLine> for PreviewLineDto {
             text: line.text,
             is_match: line.is_match,
             match_ranges,
+            clip: line.clip.map(|clip| ClipDto {
+                before_bytes: clip.before_bytes,
+                after_bytes: clip.after_bytes,
+            }),
         }
     }
 }
 
-/// A whole text file for the preview. See `spelunker_core::read_file_text`.
+/// Lines of a text file for the preview. See `spelunker_core::read_lines`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileTextDto {
@@ -271,10 +304,31 @@ mod tests {
             text: "é\u{1F600}needle".to_string(),
             is_match: true,
             match_ranges: std::iter::once(6..12).collect(),
+            clip: None,
         };
         let dto = PreviewLineDto::from(line);
         assert_eq!(dto.match_ranges, vec![Utf16Range { start: 3, end: 9 }]);
         assert_eq!(dto.line_number, 7);
+    }
+
+    #[test]
+    fn a_clipped_line_reports_what_was_cut_and_a_whole_line_says_nothing() {
+        let line = |clip| PreviewLine {
+            line_number: 1,
+            text: "needle".to_string(),
+            is_match: true,
+            match_ranges: std::iter::once(0..6).collect(),
+            clip,
+        };
+        let clipped = PreviewLineDto::from(line(Some(spelunker_core::Clip {
+            before_bytes: 10,
+            after_bytes: 20,
+        })));
+        let json = serde_json::to_value(&clipped).unwrap();
+        assert_eq!(json["clip"]["beforeBytes"], 10);
+        assert_eq!(json["clip"]["afterBytes"], 20);
+        let whole = serde_json::to_value(PreviewLineDto::from(line(None))).unwrap();
+        assert!(whole.get("clip").is_none());
     }
 
     /// A request with these roots, searching subfolders without a depth limit.
@@ -392,6 +446,66 @@ mod tests {
         );
         let query = config.content.unwrap();
         assert!(query.regex && query.multi_line && query.match_case);
+    }
+
+    #[test]
+    fn ignore_files_are_respected_only_when_the_request_says_so() {
+        let request = |extra: &str| {
+            let json = format!(
+                r#"{{"roots": ["C:/x"], "namePatterns": "", "query": {{"text": "", "matchCase": false, "wholeWord": false, "regex": false, "multiLine": false}},
+                "recurse": true, "maxDepth": null, "includeHidden": false, "includeBinary": false, "followLinks": false{extra},
+                "nameIsRegex": false, "minSize": null, "maxSize": null,
+                "modified": {{"fromMs": null, "toMs": null}}, "created": {{"fromMs": null, "toMs": null}}}}"#
+            );
+            serde_json::from_str::<SearchRequest>(&json)
+                .unwrap()
+                .into_config()
+        };
+        assert!(
+            !request("").respect_gitignore,
+            "an older request has no such field"
+        );
+        assert!(request(r#", "respectGitignore": true"#).respect_gitignore);
+    }
+
+    #[test]
+    fn documents_are_searched_only_when_the_request_says_so() {
+        let request = |extra: &str| {
+            let json = format!(
+                r#"{{"roots": ["C:/x"], "namePatterns": "", "query": {{"text": "", "matchCase": false, "wholeWord": false, "regex": false, "multiLine": false}},
+                "recurse": true, "maxDepth": null, "includeHidden": false, "includeBinary": false, "followLinks": false{extra},
+                "nameIsRegex": false, "minSize": null, "maxSize": null,
+                "modified": {{"fromMs": null, "toMs": null}}, "created": {{"fromMs": null, "toMs": null}}}}"#
+            );
+            serde_json::from_str::<SearchRequest>(&json)
+                .unwrap()
+                .into_config()
+        };
+        assert!(
+            !request("").search_documents,
+            "an older request has no such field"
+        );
+        assert!(request(r#", "searchDocuments": true"#).search_documents);
+    }
+
+    #[test]
+    fn archives_are_searched_only_when_the_request_says_so() {
+        let request = |extra: &str| {
+            let json = format!(
+                r#"{{"roots": ["C:/x"], "namePatterns": "", "query": {{"text": "", "matchCase": false, "wholeWord": false, "regex": false, "multiLine": false}},
+                "recurse": true, "maxDepth": null, "includeHidden": false, "includeBinary": false, "followLinks": false{extra},
+                "nameIsRegex": false, "minSize": null, "maxSize": null,
+                "modified": {{"fromMs": null, "toMs": null}}, "created": {{"fromMs": null, "toMs": null}}}}"#
+            );
+            serde_json::from_str::<SearchRequest>(&json)
+                .unwrap()
+                .into_config()
+        };
+        assert!(
+            !request("").search_archives,
+            "an older request has no such field"
+        );
+        assert!(request(r#", "searchArchives": true"#).search_archives);
     }
 
     #[test]

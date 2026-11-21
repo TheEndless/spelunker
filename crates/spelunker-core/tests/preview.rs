@@ -1,7 +1,15 @@
 mod common;
 
 use common::{utf16le, write};
-use spelunker_core::{preview_file, ContentQuery, PreviewLine};
+use spelunker_core::{preview_file, preview_matches, ContentQuery, PreviewBudget, PreviewLine};
+
+/// A budget of `count` lines and no limit on bytes.
+fn up_to_lines(count: usize) -> PreviewBudget {
+    PreviewBudget {
+        lines: count,
+        bytes: usize::MAX,
+    }
+}
 
 fn numbered_lines(count: usize) -> Vec<u8> {
     (1..=count)
@@ -106,4 +114,90 @@ fn an_invalid_regex_is_an_error_not_a_panic() {
         ..ContentQuery::literal("(unclosed")
     };
     assert!(preview_file(&path, &query, 1, false).is_err());
+}
+
+#[test]
+fn a_preview_stops_at_the_line_limit_and_says_more_matches_follow() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(root.path(), "many.txt", &numbered_lines(1000));
+    let preview = preview_matches(
+        &path,
+        &ContentQuery::literal("line"),
+        0,
+        false,
+        up_to_lines(10),
+    )
+    .unwrap();
+    assert_eq!(line_numbers(&preview.lines), (1..=10).collect::<Vec<u64>>());
+    assert!(preview.truncated);
+    assert!(!preview.binary);
+}
+
+#[test]
+fn context_around_the_last_kept_match_is_not_cut_by_the_limit() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(root.path(), "many.txt", &numbered_lines(1000));
+    let query = ContentQuery::literal("line 5");
+    let preview = preview_matches(&path, &query, 1, false, up_to_lines(4)).unwrap();
+    // The matches are line 5, then 50 to 59, then 500 to 599. Line 49 is context for the match
+    // that did not fit, so it is not left behind without it.
+    assert!(preview.truncated);
+    assert_eq!(line_numbers(&preview.lines), vec![4, 5, 6]);
+}
+
+#[test]
+fn a_preview_under_the_limit_is_whole_and_not_truncated() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(root.path(), "ten.txt", &numbered_lines(10));
+    let preview = preview_matches(
+        &path,
+        &ContentQuery::literal("line"),
+        0,
+        false,
+        up_to_lines(10),
+    )
+    .unwrap();
+    assert_eq!(preview.lines.len(), 10);
+    assert!(!preview.truncated);
+}
+
+#[test]
+fn the_limit_applies_to_the_text_of_documents_too() {
+    let root = tempfile::tempdir().unwrap();
+    let text: String = (1..=50).map(|number| format!("line {number}\n")).collect();
+    let path = common::write_zip(root.path(), "a.zip", &[("x.txt", &text)]);
+    let preview = preview_matches(
+        &path,
+        &ContentQuery::literal("line"),
+        0,
+        false,
+        up_to_lines(5),
+    )
+    .unwrap();
+    assert_eq!(preview.lines.len(), 5);
+    assert!(preview.truncated);
+}
+
+#[test]
+fn a_binary_file_is_reported_as_binary_with_no_lines() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(root.path(), "data.bin", b"needle\0more\n");
+    let query = ContentQuery::literal("needle");
+    let preview = preview_matches(&path, &query, 1, false, up_to_lines(10)).unwrap();
+    assert!(preview.binary);
+    assert!(preview.lines.is_empty());
+}
+
+#[test]
+fn a_preview_stops_at_the_byte_budget_too() {
+    let root = tempfile::tempdir().unwrap();
+    let path = write(root.path(), "many.txt", &numbered_lines(1000));
+    let budget = PreviewBudget {
+        lines: 1000,
+        bytes: 50,
+    };
+    let preview = preview_matches(&path, &ContentQuery::literal("line"), 0, false, budget).unwrap();
+    assert!(preview.truncated);
+    assert!(preview.lines.len() < 10, "{} lines", preview.lines.len());
+    assert!(!preview.lines.is_empty());
 }

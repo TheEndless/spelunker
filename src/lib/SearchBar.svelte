@@ -20,6 +20,7 @@
   interface Props {
     preferences: Preferences;
     savedSearches: SavedSearch[];
+    recentSearches: Criteria[];
     savedNotice: string | null;
     running: boolean;
     /** Stop was requested and is still being carried out. */
@@ -36,6 +37,7 @@
     onSaveSearch: (name: string) => void;
     onRecallSearch: (criteria: Criteria) => void;
     onDeleteSearch: (name: string) => void;
+    onClearRecentSearches: () => void;
     onExport: (format: ExportFormat) => void;
     onOpenSettings: () => void;
   }
@@ -43,6 +45,7 @@
   let {
     preferences,
     savedSearches,
+    recentSearches,
     savedNotice,
     running,
     stopping,
@@ -56,6 +59,7 @@
     onSaveSearch,
     onRecallSearch,
     onDeleteSearch,
+    onClearRecentSearches,
     onExport,
     onOpenSettings,
   }: Props = $props();
@@ -180,6 +184,12 @@
             <label class="option" title="Also search inside binary files, not only text"
               ><input type="checkbox" bind:checked={criteria.includeBinary} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Binary files</label
             >
+            <label class="option" title="Also search the text inside Word, Excel, PowerPoint and PDF files and their OpenDocument equivalents (docx, xlsx, pptx, odt, ods, odp, pdf)"
+              ><input type="checkbox" bind:checked={criteria.searchDocuments} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Documents</label
+            >
+            <label class="option" title="Also search the text files inside zip, tar and gzip archives (zip, jar, tar, tgz, gz and more). Nothing is extracted to disk."
+              ><input type="checkbox" bind:checked={criteria.searchArchives} /><span class="mark" aria-hidden="true"><Icon name="check" size={11} /></span>Archives</label
+            >
           </div>
         </div>
       </div>
@@ -300,8 +310,11 @@
         <div class="tools">
           <SavedSearchesMenu
             searches={savedSearches}
+            recent={recentSearches}
             notice={savedNotice}
             onRecall={(search) => onRecallSearch(search.criteria)}
+            onRecallRecent={onRecallSearch}
+            onClearRecent={onClearRecentSearches}
             onSave={onSaveSearch}
             onDelete={onDeleteSearch}
           />

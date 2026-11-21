@@ -56,6 +56,39 @@ describe('Preferences', () => {
     });
   });
 
+  describe('recent searches', () => {
+    it('starts empty, and loads what was stored', () => {
+      expect(loadWith(null).recentSearches).toEqual([]);
+      const preferences = loadWith({ recentSearches: [{ text: 'alpha', lookIn: 'C:/x' }, 'junk'] });
+      expect(preferences.recentSearches).toHaveLength(1);
+      expect(preferences.recentSearches[0]).toMatchObject({ text: 'alpha', lookIn: 'C:/x' });
+    });
+
+    it('remembers the search that is set up, newest first, and saves them', () => {
+      const preferences = loadWith(null);
+      preferences.criteria.text = 'alpha';
+      preferences.rememberSearch();
+      preferences.criteria.text = 'beta';
+      preferences.rememberSearch();
+      expect(preferences.recentSearches.map((search) => search.text)).toEqual(['beta', 'alpha']);
+      preferences.save();
+      expect(JSON.parse(stored.get(STORAGE_KEY)!).recentSearches).toHaveLength(2);
+    });
+
+    it('can be cleared without touching the saved criteria', () => {
+      const preferences = loadWith({ criteria: { text: 'alpha' }, recentSearches: [{ text: 'alpha' }] });
+      preferences.clearRecentSearches();
+      expect(preferences.recentSearches).toEqual([]);
+      expect(preferences.criteria.text).toBe('alpha');
+    });
+
+    it('is emptied by a reset', () => {
+      const preferences = loadWith({ recentSearches: [{ text: 'alpha' }] });
+      preferences.reset();
+      expect(preferences.recentSearches).toEqual([]);
+    });
+  });
+
   describe('map shading', () => {
     it('starts as facet when nothing is stored', () => {
       expect(loadWith(null).mapShading).toBe('facet');
